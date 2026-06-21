@@ -13,12 +13,14 @@ agent runs.
 ╰────────── ~/projects/pi-plugins (main) · 12% ────╯
 ```
 
-The border color still reflects the active **thinking level** (pi's built-in
-`EditorTheme.borderColor`). The model name gains a ` (<level>)` suffix showing
-the current thinking level — e.g. `claude-sonnet-4-5 (high)` — taken from
-`pi.getThinkingLevel()` (`minimal`/`low`/`medium`/`high`/`xhigh`). The suffix
-is omitted when thinking is `off`, since pi clamps non-reasoning models to
-`off` anyway.
+The box frame is plain (default fg); the **thinking-level color** (pi's
+`EditorTheme.borderColor`, set per active thinking level) highlights the
+"live" text — model name, thinking-level suffix, git branch, and context %.
+cwd is dimmed one step (muted) so it recedes behind those. The model name
+gains a ` (<level>)` suffix showing the current thinking level — e.g.
+`claude-sonnet-4-5 (high)` — taken from `pi.getThinkingLevel()`
+(`minimal`/`low`/`medium`/`high`/`xhigh`). The suffix is omitted when thinking
+is `off`, since pi clamps non-reasoning models to `off` anyway.
 
 ## Install
 

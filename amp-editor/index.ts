@@ -9,16 +9,19 @@
  *
  *   pi -e /Users/spike/projects/pi-plugins/amp-editor
  *
- * Layout:
+ * Layout (the thinking-level color highlights "live" text — here shown in
+ * [brackets]; the box frame is plain, cwd dimmed one step):
  *
- *   ╭ ⠋─────────────────────────────────── claude-sonnet-4-5 ╮
- *   │ █                                                    │
- *   │                                                      │
- *   ╰────────── ~/projects/pi-plugins (main) · 12% ────╯
+ *   ╭ ⠋─────────────────────────── [claude-sonnet-4-5 (high)] ─╮
+ *   │ █                                                        │
+ *   │                                                          │
+ *   ╰────────── ~/projects/pi-plugins [(main)] [· 12%] ────────╯
  *
- * The border color still reflects the active thinking level (pi's built-in
- * behavior via EditorTheme.borderColor), so thinking is communicated without
- * extra text.
+ * Color scheme:
+ *   - Box frame (corners, sides, dashes): plain default fg.
+ *   - Model name + (level), git branch, ctx %: thinking-level color (pi's
+ *     EditorTheme.borderColor, set per active thinking level by pi).
+ *   - cwd: one step dimmer (muted) than the frame.
  *
  * The base editor is rendered at `width - 2` and its content lines are then
  * wrapped in `│ … │`. The top/bottom border lines from the base are replaced
@@ -68,10 +71,10 @@ const SPINNER_INTERVAL_MS = 80;
 /**
  * Build a horizontal border line with corners and optional labels docked to
  * the left and right. Labels are truncated (right first, then left) until they
- * fit with at least `minGap` fill dashes between them.
+ * fit with at least `minGap` dashes between them.
  *
- *   renderBorder("╭","╮", left, right, width, border, fill)
- *   => "╭<left><fill dashes><right>╮"
+ *   renderBorder("╭","╮", left, right, width, border)
+ *   => "╭<left><dashes><right>╮"
  */
 function renderBorder(
 	cornerL: string,
@@ -80,7 +83,6 @@ function renderBorder(
 	right: string,
 	width: number,
 	border: (s: string) => string,
-	fill: (s: string) => string = border,
 	minGap = 3,
 ): string {
 	const inner = width - visibleWidth(cornerL) - visibleWidth(cornerR);
@@ -97,7 +99,7 @@ function renderBorder(
 	}
 
 	const gap = Math.max(0, inner - visibleWidth(l) - visibleWidth(r));
-	return border(cornerL) + l + fill(CORNERS.dash.repeat(gap)) + r + border(cornerR);
+	return border(cornerL) + l + border(CORNERS.dash.repeat(gap)) + r + border(cornerR);
 }
 
 /** `~/projects/x` for display, collapsing $HOME. */
@@ -107,13 +109,27 @@ function formatCwd(cwd: string): string {
 	return cwd;
 }
 
-/** ` · 12%` when usage is known and non-zero, else empty (nothing to show at 0%). */
+/**
+ * ` · 12%` when usage is known and non-zero, else empty (nothing to show at
+ * 0%). Cached and recomputed only when marked stale — getContextUsage() can
+ * estimate tokens over trailing messages, so recomputing on every render and
+ * every 80ms spinner tick during streaming is wasteful.
+ */
+let cachedCtxText = "";
+let ctxCacheStale = true;
 function formatContext(ctx: ExtensionContext): string {
-	const usage = ctx.getContextUsage();
-	const window = usage?.contextWindow ?? ctx.model?.contextWindow;
-	if (!window || !usage || usage.percent == null) return "";
-	const pct = Math.round(usage.percent);
-	return pct > 0 ? ` · ${pct}%` : "";
+	if (ctxCacheStale) {
+		const usage = ctx.getContextUsage();
+		const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow;
+		if (!contextWindow || !usage || usage.percent == null) {
+			cachedCtxText = "";
+		} else {
+			const pct = Math.round(usage.percent);
+			cachedCtxText = pct > 0 ? ` · ${pct}%` : "";
+		}
+		ctxCacheStale = false;
+	}
+	return cachedCtxText;
 }
 
 /**
@@ -122,9 +138,12 @@ function formatContext(ctx: ExtensionContext): string {
  * custom border. Safe to run on ANSI-laden strings: the regex anchors on the
  * literal arrow + " more " around the digits.
  */
+const SCROLL_UP_RE = /↑ (\d+) more/;
+const SCROLL_DOWN_RE = /↓ (\d+) more/;
 function matchScroll(line: string | undefined, arrow: "↑" | "↓"): number | null {
 	if (!line) return null;
-	const m = line.match(new RegExp(`${arrow} (\\d+) more`));
+	const re = arrow === "↑" ? SCROLL_UP_RE : SCROLL_DOWN_RE;
+	const m = re.exec(line);
 	return m ? Number(m[1]!) : null;
 }
 
@@ -152,7 +171,6 @@ export default function (pi: ExtensionAPI) {
 	let spinnerTimer: ReturnType<typeof setInterval> | undefined;
 	let activeTui: TUI | undefined;
 	let branch: string | undefined;
-	let branchTimer: ReturnType<typeof setInterval> | undefined;
 
 	const stopSpinner = () => {
 		if (spinnerTimer) {
@@ -186,17 +204,22 @@ export default function (pi: ExtensionAPI) {
 		activeTui?.requestRender();
 	});
 
-	// Re-render when things shown in the border change.
-	pi.on("model_select", () => activeTui?.requestRender());
+	// Re-render when things shown in the border change. turn_end also refreshes
+	// the cached context % and git branch (cheap; covers checkouts that happened
+	// during the turn, and the new context usage after the turn).
+	pi.on("model_select", () => {
+		ctxCacheStale = true; // context window may differ per model
+		activeTui?.requestRender();
+	});
 	pi.on("thinking_level_select", () => activeTui?.requestRender());
-	pi.on("turn_end", () => activeTui?.requestRender()); // context % updates
+	pi.on("turn_end", (_e, ctx) => {
+		ctxCacheStale = true;
+		void refreshBranch(ctx);
+		activeTui?.requestRender();
+	});
 
 	pi.on("session_shutdown", () => {
 		stopSpinner();
-		if (branchTimer) {
-			clearInterval(branchTimer);
-			branchTimer = undefined;
-		}
 		activeTui = undefined;
 	});
 
@@ -207,9 +230,8 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.setWorkingVisible(false);
 		ctx.ui.setFooter(() => new EmptyComponent());
 
+		ctxCacheStale = true; // new session: context usage and window are fresh
 		void refreshBranch(ctx);
-		// Cheap periodic branch refresh (covers checkouts done outside pi).
-		branchTimer = setInterval(() => void refreshBranch(ctx), 10_000);
 
 		class AmpEditor extends CustomEditor {
 			constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) {
@@ -235,8 +257,8 @@ export default function (pi: ExtensionAPI) {
 				const th = ctx.ui.theme;
 				// Color scheme: the thinking-level color (this.borderColor, set by pi
 				// from the active thinking level) highlights "live" info — model name,
-				// thinking level, git branch, context %. The box frame and cwd path use
-				// plain (default) text color, like the model name used to.
+				// thinking level, git branch, context %. The box frame uses plain
+				// (default) text color; cwd is dimmed one step (muted).
 				const thinkingFg = (s: string) => this.borderColor(s);
 				const frame = (s: string) => s;
 				const side = frame(CORNERS.side);
