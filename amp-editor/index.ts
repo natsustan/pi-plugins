@@ -9,19 +9,21 @@
  *
  *   pi -e /Users/spike/projects/pi-plugins/amp-editor
  *
- * Layout (the thinking-level color highlights "live" text — here shown in
- * [brackets]; the box frame is plain, cwd dimmed one step):
+ * Layout ([brackets] mark the thinking-level color for the model name; the
+ * box frame is plain):
  *
  *   ╭ ⠋─────────────────────────── [claude-sonnet-4-5 (high)] ─╮
  *   │ █                                                        │
  *   │                                                          │
- *   ╰────────── ~/projects/pi-plugins [(main)] [· 12%] ────────╯
+ *   ╰────────── ~/projects/pi-plugins (main) · 12% ────────╯
  *
  * Color scheme:
  *   - Box frame (corners, sides, dashes): plain default fg.
- *   - Model name + (level), git branch, ctx %: thinking-level color (pi's
- *     EditorTheme.borderColor, set per active thinking level by pi).
- *   - cwd: one step dimmer (muted) than the frame.
+ *   - Model name + (level): thinking-level color (pi's EditorTheme.borderColor,
+ *     set per active thinking level by pi).
+ *   - cwd, git branch, ctx %: muted (pi's dim text color), so the whole
+ *     bottom-right cluster — the "file folder name" plus branch + context —
+ *     shares one consistent color.
  *
  * The base editor is rendered at `width - 2` and its content lines are then
  * wrapped in `│ … │`. The top/bottom border lines from the base are replaced
@@ -256,10 +258,13 @@ export default function (pi: ExtensionAPI) {
 
 				const th = ctx.ui.theme;
 				// Color scheme: the thinking-level color (this.borderColor, set by pi
-				// from the active thinking level) highlights "live" info — model name,
-				// thinking level, git branch, context %. The box frame uses plain
-				// (default) text color; cwd is dimmed one step (muted).
+				// from the active thinking level) highlights the model name + thinking
+				// level. cwd, git branch, and context % are all muted (pi's dim text
+				// color) so the whole bottom-right cluster — the "file folder name"
+				// plus branch + context — shares one consistent color. The box frame
+				// uses plain (default) text color.
 				const thinkingFg = (s: string) => this.borderColor(s);
+				const mutedFg = (s: string) => th.fg("muted", s);
 				const frame = (s: string) => s;
 				const side = frame(CORNERS.side);
 
@@ -308,14 +313,13 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				// --- bottom border: scroll-down on the left, cwd(branch)·ctx on the right.
-				// cwd stays plain; git branch and context % take the thinking-level color.
+				// cwd, git branch, and context % are all muted so they form one visually
+				// unified cluster.
 				const bottomLeft = bottomScroll != null ? th.fg("muted", ` ↓ ${bottomScroll} `) : "";
-				// cwd one step dimmer than plain text (matches the scroll indicator),
-				// so it recedes behind the thinking-colored branch + ctx %.
-				const cwdPart = th.fg("muted", formatCwd(ctx.cwd));
-				const branchPart = branch ? thinkingFg(` (${branch})`) : "";
+				const cwdPart = mutedFg(formatCwd(ctx.cwd));
+				const branchPart = branch ? mutedFg(` (${branch})`) : "";
 				const ctxPart = formatContext(ctx);
-				const ctxColored = ctxPart ? thinkingFg(ctxPart) : "";
+				const ctxColored = ctxPart ? mutedFg(ctxPart) : "";
 				const bottomRight = ` ${cwdPart}${branchPart}${ctxColored} ` + frame(CORNERS.dash);
 				out.push(
 					renderBorder(CORNERS.bottomLeft, CORNERS.bottomRight, bottomLeft, bottomRight, width, frame),

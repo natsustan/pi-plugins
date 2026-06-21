@@ -13,12 +13,14 @@ agent runs.
 ╰────────── ~/projects/pi-plugins (main) · 12% ────╯
 ```
 
-The box frame is plain (default fg); the **thinking-level color** (pi's
-`EditorTheme.borderColor`, set per active thinking level) highlights the
-"live" text — model name, thinking-level suffix, git branch, and context %.
-cwd is dimmed one step (muted) so it recedes behind those. The model name
+The box frame is plain (default fg). The **thinking-level color** (pi's
+`EditorTheme.borderColor`, set per active thinking level) highlights the model
+name + thinking-level suffix. The bottom-right cluster — **cwd, git branch,
+and context %** — is uniformly **muted** (pi's dim text color), matching the
+cwd display so the whole cluster reads as one consistent unit. The model name
 gains a ` (<level>)` suffix showing the current thinking level — e.g.
-`claude-sonnet-4-5 (high)` — taken from `pi.getThinkingLevel()`
+suffix showing the current thinking level — e.g. `claude-sonnet-4-5 (high)`
+— taken from `pi.getThinkingLevel()`
 (`minimal`/`low`/`medium`/`high`/`xhigh`). The suffix is omitted when thinking
 is `off`, since pi clamps non-reasoning models to `off` anyway.
 
@@ -58,7 +60,7 @@ pi -e /Users/spike/projects/pi-plugins/amp-editor
 | ------------------ | ------------------------------- | ---------------------------------------------------- |
 | Editor top border  | plain `──────`                  | `╭ [spinner]───── model (<level>) ╮`                  |
 | Editor sides       | none                            | `│ … │` (text inset 1 col from the border)            |
-| Editor bottom      | plain `──────`                  | `╰ [↓ N]───── ~/cwd (branch) · % ╯`                  |
+| Editor bottom      | plain `──────`                  | `╰ [↓ N]───── ~/cwd (branch) · % ╯` (muted cluster)  |
 | Working indicator  | separate row above editor       | spinner inline in the top-left of the panel          |
 | Footer             | model / tokens / cost / cwd row | hidden (the panel now carries model + cwd + context) |
 
