@@ -72,6 +72,10 @@ type ModesFile = {
 	version: 1;
 	currentMode: ModeName;
 	modes: Record<ModeName, ModeSpec>;
+	/** When true (default), snap thinking back to the active mode's preset if a
+	 * non-mode change (shift+tab / app.thinking.cycle, settings, …) diverges it.
+	 * The keybinding itself is reserved, so this is enforced in the event handler. */
+	lockThinkingWhenModeActive?: boolean;
 };
 
 type LoadedModes = {
@@ -96,6 +100,8 @@ const BOOTSTRAP_MODES: Array<{ name: ModeName; spec: Required<Pick<ModeSpec, "pr
 const MODE_UI_CONFIGURE = "Configure modes…";
 const MODE_UI_ADD = "Add mode…";
 const MODE_UI_BACK = "Back";
+const MODE_UI_LOCK_THINKING_ON = "Lock thinking to active mode: on";
+const MODE_UI_LOCK_THINKING_OFF = "Lock thinking to active mode: off";
 
 const ALL_THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const THINKING_UNSET_LABEL = "(don't change)";
@@ -263,12 +269,19 @@ function sanitizeModeSpec(spec: unknown): ModeSpec {
 	};
 }
 
+/** Read the thinking-lock flag from a raw parsed modes file. Default ON: a mode
+ *  is a fixed model+thinking preset, so thinking stays pinned to it unless the
+ *  user opts out (via /mode configure). */
+function readLockThinkingFlag(parsed: Record<string, unknown>): boolean {
+	return parsed.lockThinkingWhenModeActive !== false;
+}
+
 function createBootstrapModesFile(): ModesFile {
 	const modes: Record<ModeName, ModeSpec> = {};
 	for (const mode of BOOTSTRAP_MODES) {
 		modes[mode.name] = { ...mode.spec };
 	}
-	return { version: 1, currentMode: "smart", modes };
+	return { version: 1, currentMode: "smart", modes, lockThinkingWhenModeActive: true };
 }
 
 function orderedModeNames(modes: Record<string, ModeSpec>): string[] {
@@ -299,7 +312,11 @@ async function loadModesFile(filePath: string): Promise<LoadedModes> {
 				: undefined;
 
 		if (hasModesProp && modesRaw && Object.keys(modesRaw).length === 0) {
-			return { data: { version: 1, currentMode: "", modes: {} }, explicitlyEmptyModes: true, fromBootstrap: false };
+			return {
+				data: { version: 1, currentMode: "", modes: {}, lockThinkingWhenModeActive: readLockThinkingFlag(parsed) },
+				explicitlyEmptyModes: true,
+				fromBootstrap: false,
+			};
 		}
 
 		const modes: Record<string, ModeSpec> = {};
@@ -308,7 +325,8 @@ async function loadModesFile(filePath: string): Promise<LoadedModes> {
 		}
 
 		const currentMode = typeof parsed.currentMode === "string" ? parsed.currentMode : "";
-		const file: ModesFile = { version: 1, currentMode, modes };
+		const lockThinkingWhenModeActive = readLockThinkingFlag(parsed);
+		const file: ModesFile = { version: 1, currentMode, modes, lockThinkingWhenModeActive };
 
 		if (orderedModeNames(file.modes).length === 0) {
 			return { data: createBootstrapModesFile(), explicitlyEmptyModes: false, fromBootstrap: true };
@@ -346,6 +364,7 @@ type ModeRuntime = {
 	data: ModesFile;
 	explicitlyEmptyModes: boolean;
 	overlayEnabled: boolean;
+	lockThinkingWhenModeActive: boolean;
 	lastRealMode: string;
 	currentMode: string;
 	applying: boolean;
@@ -357,6 +376,7 @@ const runtime: ModeRuntime = {
 	data: createBootstrapModesFile(),
 	explicitlyEmptyModes: false,
 	overlayEnabled: true,
+	lockThinkingWhenModeActive: true,
 	lastRealMode: "smart",
 	currentMode: "smart",
 	applying: false,
@@ -367,6 +387,11 @@ let lastObservedModel: { provider?: string; modelId?: string } = {};
 
 // Serializes cycle shortcut repeats so rapid key repeats can't race mode inference.
 let modeCycleQueue: Promise<void> = Promise.resolve();
+
+// Re-entrancy guard for the thinking lock: our revert calls pi.setThinkingLevel(),
+// which re-emits thinking_level_select synchronously. This flag short-circuits the
+// re-entry so we don't loop.
+let revertingThinking = false;
 
 async function ensureRuntime(_pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 	const filePath = await resolveModesPath(ctx.cwd);
@@ -382,6 +407,7 @@ async function ensureRuntime(_pi: ExtensionAPI, ctx: ExtensionContext): Promise<
 		runtime.data = loaded.data;
 		runtime.explicitlyEmptyModes = loaded.explicitlyEmptyModes;
 		runtime.overlayEnabled = !loaded.explicitlyEmptyModes && orderedModeNames(loaded.data.modes).length > 0;
+		runtime.lockThinkingWhenModeActive = loaded.data.lockThinkingWhenModeActive !== false;
 
 		// First run: no modes.json anywhere. Persist the bootstrap defaults so
 		// the user can discover and edit them. Ignore write errors gracefully.
@@ -902,7 +928,8 @@ async function configureModesUI(pi: ExtensionAPI, ctx: ExtensionContext): Promis
 	while (true) {
 		await ensureRuntime(pi, ctx);
 		const names = orderedModeNames(runtime.data.modes);
-		const options = [...names, MODE_UI_ADD, MODE_UI_BACK];
+		const lockLabel = runtime.lockThinkingWhenModeActive ? MODE_UI_LOCK_THINKING_ON : MODE_UI_LOCK_THINKING_OFF;
+		const options = [...names, MODE_UI_ADD, lockLabel, MODE_UI_BACK];
 		const title = runtime.overlayEnabled
 			? `Configure modes (current: ${runtime.currentMode})`
 			: "Configure modes (overlay disabled: modes is empty)";
@@ -914,6 +941,19 @@ async function configureModesUI(pi: ExtensionAPI, ctx: ExtensionContext): Promis
 			if (created) {
 				await editModeUI(pi, ctx, created);
 			}
+			continue;
+		}
+
+		if (choice === lockLabel) {
+			await mutateModesFile(pi, ctx, (data) => {
+				data.lockThinkingWhenModeActive = !runtime.lockThinkingWhenModeActive;
+			});
+			ctx.ui.notify(
+				runtime.lockThinkingWhenModeActive
+					? "Thinking now locked to active mode"
+					: "Thinking no longer locked to active mode",
+				"info",
+			);
 			continue;
 		}
 
@@ -1050,11 +1090,61 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// A thinking-level change can flip the matched mode (modes are matched on
-	// provider + modelId + thinkingLevel). Re-sync immediately so the badge
-	// updates without waiting for the next prompt. Guarded like model_select
-	// so applyMode's own setThinkingLevel() doesn't trigger a premature re-sync.
+	// provider + modelId + thinkingLevel). When a mode is active AND the lock is
+	// on, we keep thinking pinned to the mode's preset: shift+tab
+	// (app.thinking.cycle) is a *reserved* keybinding that extensions can't
+	// rebind, so we revert here in the event handler instead. If no mode is
+	// active ("custom"), the model just changed, or the lock is off, we fall
+	// through to re-matching (which may drop to "custom").
 	pi.on("thinking_level_select", async (_event, ctx) => {
-		if (runtime.applying) return;
+		if (runtime.applying || revertingThinking) return;
+		await ensureRuntime(pi, ctx);
+		if (!runtime.overlayEnabled) {
+			publishMode(pi);
+			return;
+		}
+
+		const mode = runtime.currentMode;
+		if (mode === "" || mode === CUSTOM_MODE_NAME) {
+			await syncModeFromCurrentSelection(pi, ctx);
+			return;
+		}
+
+		const spec = runtime.data.modes[mode];
+		// Mode didn't pin a thinking level — cycling thinking doesn't break its identity.
+		if (!spec?.thinkingLevel) {
+			await syncModeFromCurrentSelection(pi, ctx);
+			return;
+		}
+
+		// If the underlying model changed (e.g. Ctrl+P), the mode is about to drop
+		// to "custom" via model_select; don't fight a provider-driven thinking clamp.
+		const selection = getCurrentSelectionSnapshot(pi, ctx);
+		const modelChanged =
+			!!spec.provider &&
+			!!spec.modelId &&
+			(spec.provider !== selection.provider || spec.modelId !== selection.modelId);
+
+		const currentLevel = pi.getThinkingLevel();
+		if (runtime.lockThinkingWhenModeActive && !modelChanged && currentLevel !== spec.thinkingLevel) {
+			revertingThinking = true;
+			try {
+				pi.setThinkingLevel(spec.thinkingLevel);
+				// setThinkingLevel clamps to model capabilities — only claim a lock if
+				// the preset actually took effect (otherwise let re-matching run).
+				const after = pi.getThinkingLevel();
+				if (after === spec.thinkingLevel) {
+					publishMode(pi);
+					if (ctx.hasUI) {
+						ctx.ui.notify(`Thinking locked to "${mode}" (${spec.thinkingLevel}) — switch via /mode`, "info");
+					}
+					return;
+				}
+			} finally {
+				revertingThinking = false;
+			}
+		}
+
 		await syncModeFromCurrentSelection(pi, ctx);
 	});
 

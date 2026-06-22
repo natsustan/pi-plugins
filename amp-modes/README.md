@@ -31,6 +31,33 @@ The active mode is reverse-matched from your current model + thinking whenever
 they change (Ctrl+P, `/model`, other extensions), so the label stays accurate.
 When nothing matches, no mode is active ("custom").
 
+## Thinking lock while a mode is active
+
+A mode is a fixed **model + thinking** preset, so by default `Shift+Tab`
+(`app.thinking.cycle`) is **disabled** while a named mode is active: any thinking
+change that diverges from the mode's preset is snapped back, with a notice like
+`Thinking locked to "smart" (high) — switch via /mode`.
+
+Why not just rebind the key? `app.thinking.cycle` is one of pi's *reserved*
+keybindings — extensions can't override it — so the lock is enforced in the
+`thinking_level_select` event handler instead. It only locks when:
+
+- a **named** mode is active (not "custom"),
+- that mode pins a `thinkingLevel`, and
+- the underlying model hasn't changed (a `Ctrl+P` model switch still drops to
+  "custom" as usual).
+
+Toggle it in `/mode configure` → *Lock thinking to active mode: on/off*, or set
+`"lockThinkingWhenModeActive": false` in `modes.json`:
+
+```json
+{
+  "currentMode": "smart",
+  "lockThinkingWhenModeActive": false,
+  "modes": { ... }
+}
+```
+
 ## Integration with amp-editor
 
 This package does **not** draw editor chrome itself. It publishes the active
