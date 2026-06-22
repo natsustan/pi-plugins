@@ -12,18 +12,18 @@
  * Layout ([brackets] mark the thinking-level color for the model name; the
  * box frame is plain):
  *
- *   ╭ ⠋─────────────────────────── [claude-sonnet-4-5 (high)] ─╮
- *   │ █                                                        │
- *   │                                                          │
- *   ╰────────── ~/projects/pi-plugins (main) · 12% ────────╯
+ *   ╭ ⠋──────────── 12% ── [claude-sonnet-4-5 (high)] ─╮
+ *   │ █                                                │
+ *   │                                                  │
+ *   ╰────────── ~/projects/pi-plugins (main) ────────╯
  *
  * Color scheme:
  *   - Box frame (corners, sides, dashes): plain default fg.
  *   - Model name + (level): thinking-level color (pi's EditorTheme.borderColor,
  *     set per active thinking level by pi).
- *   - cwd, git branch, ctx %: muted (pi's dim text color), so the whole
- *     bottom-right cluster — the "file folder name" plus branch + context —
- *     shares one consistent color.
+ *   - cwd, git branch, ctx %: muted (pi's dim text color). ctx % sits in the
+ *     top-right next to the model/mode label; cwd + branch sit in the
+ *     bottom-right. Muted in both spots so each reads as "info".
  *
  * The base editor is rendered at `width - 2` and its content lines are then
  * wrapped in `│ … │`. The top/bottom border lines from the base are replaced
@@ -67,6 +67,35 @@ const CORNERS = {
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 80;
+
+// ---- mode label (sourced from the amp-modes extension) ---------------------
+//
+// CROSS-PACKAGE CONTRACT: amp-modes publishes the active mode to a
+// process-global mailbox (Symbol.for) and fires an event whenever it changes.
+// We read the mailbox on each render to label the top border, and subscribe to
+// the event so a label change without a model/thinking event still forces a
+// repaint. Symbol.for is global by construction, but MODE_CHANGE_CHANNEL is a
+// plain string and WILL SILENTLY BREAK badge repaints if the two sides drift.
+// If you rename it here, rename it in amp-modes/index.ts too (and vice versa).
+const MODE_MAILBOX = Symbol.for("amp.modes.current");
+const MODE_CHANGE_CHANNEL = "amp:modes-change";
+type RGB = { r: number; g: number; b: number };
+type ModeUiHints = {
+	labelColors: { default?: RGB };
+};
+type ModeMailboxValue = { mode: string; uiHints?: ModeUiHints } | null;
+
+function readModeLabel(): ModeMailboxValue {
+	return (globalThis as any)[MODE_MAILBOX] ?? null;
+}
+
+/** Color a mode badge from fixed RGB uiHints; fall back to thinking color. */
+function renderModeBadge(label: ModeMailboxValue, thinkingFg: (s: string) => string): string {
+	if (!label) return "";
+	const body = ` ${label.mode} `;
+	const rgb = label.uiHints?.labelColors.default;
+	return rgb ? `\u001b[38;2;${rgb.r};${rgb.g};${rgb.b}m${body}\u001b[39m` : thinkingFg(body);
+}
 
 // ---- helpers --------------------------------------------------------------
 
@@ -112,10 +141,12 @@ function formatCwd(cwd: string): string {
 }
 
 /**
- * ` · 12%` when usage is known and non-zero, else empty (nothing to show at
- * 0%). Cached and recomputed only when marked stale — getContextUsage() can
- * estimate tokens over trailing messages, so recomputing on every render and
- * every 80ms spinner tick during streaming is wasteful.
+ * `12%` (no prefix) when usage is known and non-zero, else empty (nothing to
+ * show at 0%). Rendered in the top border next to the mode/model label, so the
+ * caller wraps it with its own spacing. Cached and recomputed only when marked
+ * stale — getContextUsage() can estimate tokens over trailing messages, so
+ * recomputing on every render and every 80ms spinner tick during streaming is
+ * wasteful.
  */
 let cachedCtxText = "";
 let ctxCacheStale = true;
@@ -127,7 +158,7 @@ function formatContext(ctx: ExtensionContext): string {
 			cachedCtxText = "";
 		} else {
 			const pct = Math.round(usage.percent);
-			cachedCtxText = pct > 0 ? ` · ${pct}%` : "";
+			cachedCtxText = pct > 0 ? `${pct}%` : "";
 		}
 		ctxCacheStale = false;
 	}
@@ -220,6 +251,9 @@ export default function (pi: ExtensionAPI) {
 		activeTui?.requestRender();
 	});
 
+	// Re-render when the modes extension changes the active mode label.
+	pi.events.on(MODE_CHANGE_CHANNEL, () => activeTui?.requestRender());
+
 	pi.on("session_shutdown", () => {
 		stopSpinner();
 		activeTui = undefined;
@@ -259,10 +293,10 @@ export default function (pi: ExtensionAPI) {
 				const th = ctx.ui.theme;
 				// Color scheme: the thinking-level color (this.borderColor, set by pi
 				// from the active thinking level) highlights the model name + thinking
-				// level. cwd, git branch, and context % are all muted (pi's dim text
-				// color) so the whole bottom-right cluster — the "file folder name"
-				// plus branch + context — shares one consistent color. The box frame
-				// uses plain (default) text color.
+				// level (and the mode badge, which replaces them when a named mode is
+				// active). Context %, cwd, and git branch are all muted (pi's dim text
+				// color) so they read as "info" regardless of which border they sit on.
+				// The box frame uses plain (default) text color.
 				const thinkingFg = (s: string) => this.borderColor(s);
 				const mutedFg = (s: string) => th.fg("muted", s);
 				const frame = (s: string) => s;
@@ -301,8 +335,27 @@ export default function (pi: ExtensionAPI) {
 				// thinking-level color.
 				const level = pi.getThinkingLevel();
 				const thinkingSuffix = level !== "off" ? ` (${level})` : "";
-				const modelText = ctx.model ? ` ${ctx.model.id}${thinkingSuffix} ` : "";
-				const model = modelText ? thinkingFg(modelText) + frame(CORNERS.dash) : "";
+				const modelText = ctx.model ? `${ctx.model.id}${thinkingSuffix}` : "";
+				// A named mode is itself a model+thinking preset, so when one is
+				// active (published by the amp-modes extension) we show ONLY the
+				// mode badge — showing both is redundant. When the selection doesn't
+				// match any mode ("custom"), fall back to the model name + level so
+				// the top-right isn't blank.
+				const modeBadge = renderModeBadge(readModeLabel(), thinkingFg);
+				const rightPrimary = modeBadge
+					? modeBadge
+					: (modelText ? thinkingFg(` ${modelText} `) : "");
+				// Context % lives in the top-right, docked to the LEFT of the mode/model
+				// label (e.g. `── 12% ─ smart ─╮`), so the bottom-right is just cwd +
+				// branch. Muted to read as "info" next to the colored mode. When there's
+				// no usage yet it's empty and the right side collapses to the label alone.
+				const ctxPct = formatContext(ctx);
+				const ctxSegment = ctxPct ? mutedFg(` ${ctxPct} `) : "";
+				const rightLabel =
+					ctxSegment && rightPrimary
+						? ctxSegment + frame(CORNERS.dash) + rightPrimary
+						: rightPrimary || ctxSegment;
+				const model = rightLabel ? rightLabel + frame(CORNERS.dash) : "";
 				out.push(renderBorder(CORNERS.topLeft, CORNERS.topRight, topLeft, model, width, frame));
 
 				// --- content lines wrapped in │ … │
@@ -312,15 +365,13 @@ export default function (pi: ExtensionAPI) {
 					out.push(side + base[i]! + side);
 				}
 
-				// --- bottom border: scroll-down on the left, cwd(branch)·ctx on the right.
-				// cwd, git branch, and context % are all muted so they form one visually
-				// unified cluster.
+				// --- bottom border: scroll-down on the left, cwd(branch) on the right.
+				// cwd and git branch are muted so they form one visually unified cluster.
+				// (Context % moved up to the top border, next to the mode/model label.)
 				const bottomLeft = bottomScroll != null ? th.fg("muted", ` ↓ ${bottomScroll} `) : "";
 				const cwdPart = mutedFg(formatCwd(ctx.cwd));
 				const branchPart = branch ? mutedFg(` (${branch})`) : "";
-				const ctxPart = formatContext(ctx);
-				const ctxColored = ctxPart ? mutedFg(ctxPart) : "";
-				const bottomRight = ` ${cwdPart}${branchPart}${ctxColored} ` + frame(CORNERS.dash);
+				const bottomRight = ` ${cwdPart}${branchPart} ` + frame(CORNERS.dash);
 				out.push(
 					renderBorder(CORNERS.bottomLeft, CORNERS.bottomRight, bottomLeft, bottomRight, width, frame),
 				);

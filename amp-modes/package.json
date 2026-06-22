@@ -1,0 +1,21 @@
+{
+  "name": "amp-modes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Named model+thinking presets for pi (rush/smart/deep), with a mode badge published to amp-editor.",
+  "main": "./index.ts",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.9"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
