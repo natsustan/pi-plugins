@@ -466,6 +466,9 @@ async function mutateModesFile(
 
 	await withFileLock(runtime.filePath, async () => {
 		const loaded = await loadModesFile(runtime.filePath);
+		if (loaded.loadError) {
+			throw new Error(`Could not read modes config; refusing to overwrite it. ${loaded.loadError}`);
+		}
 		const next = cloneModesFile(loaded.data);
 		mutator(next);
 
@@ -719,7 +722,7 @@ async function applyMode(pi: ExtensionAPI, ctx: ExtensionContext, mode: string):
 			}
 		}
 
-		if (spec.thinkingLevel) {
+		if (modelAppliedOk && spec.thinkingLevel) {
 			pi.setThinkingLevel(spec.thinkingLevel);
 		}
 	} finally {

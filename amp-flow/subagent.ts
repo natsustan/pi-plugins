@@ -19,6 +19,7 @@ import {
 import { streamSimple } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+	buildSessionContext,
 	convertToLlm,
 	createBashTool,
 	createEditTool,
@@ -26,7 +27,7 @@ import {
 	createWriteTool,
 	getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
-import type { ExtensionContext, SessionEntry, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import type { Component } from "@earendil-works/pi-tui";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
@@ -145,10 +146,9 @@ export function formatToolCall(
 }
 
 export function extractSessionMessages(ctx: ExtensionContext): any[] {
-	const branch = ctx.sessionManager.getBranch();
-	return branch
-		.filter((entry): entry is SessionEntry & { type: "message" } => entry.type === "message")
-		.map((entry) => entry.message)
+	const entries = ctx.sessionManager.getEntries();
+	const leafId = ctx.sessionManager.getLeafId();
+	return buildSessionContext(entries, leafId).messages
 		.filter((message: any) => !(message.role === "custom" && message.customType === "btw-result"));
 }
 

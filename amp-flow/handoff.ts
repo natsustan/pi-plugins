@@ -103,7 +103,7 @@ async function performHandoff(
 	fromCommand: boolean,
 	stash: (v: { prompt: string; parentSession: string | undefined }) => void,
 ): Promise<string | undefined> {
-	if (!ctx.hasUI) return "Handoff requires interactive mode.";
+	if (ctx.mode !== "tui") return "Handoff requires interactive mode.";
 	if (!ctx.model) return "No model selected.";
 
 	const messages = extractSessionMessages(ctx);
@@ -137,7 +137,7 @@ async function performHandoff(
 		return loader;
 	});
 
-	if (summary === null) return "Handoff cancelled.";
+	if (summary == null) return "Handoff cancelled.";
 
 	const finalPrompt = buildFinalPrompt(goal, summary, parentSession);
 
