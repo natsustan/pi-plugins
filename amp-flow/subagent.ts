@@ -23,6 +23,9 @@ import {
 	convertToLlm,
 	createBashTool,
 	createEditTool,
+	createFindTool,
+	createGrepTool,
+	createLsTool,
 	createReadTool,
 	createWriteTool,
 	getMarkdownTheme,
@@ -152,6 +155,33 @@ export function extractSessionMessages(ctx: ExtensionContext): any[] {
 		.filter((message: any) => !(message.role === "custom" && message.customType === "btw-result"));
 }
 
+function buildActiveSubagentTools(pi: ExtensionAPI, ctx: ExtensionContext): AgentTool<any>[] {
+	const configuredTools = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
+	return pi.getActiveTools().flatMap((name): AgentTool<any>[] => {
+		const configuredTool = configuredTools.get(name);
+		if (configuredTool?.sourceInfo.path !== `<builtin:${name}>`) return [];
+
+		switch (name) {
+			case "read":
+				return [createReadTool(ctx.cwd)];
+			case "bash":
+				return [createBashTool(ctx.cwd)];
+			case "edit":
+				return [createEditTool(ctx.cwd)];
+			case "write":
+				return [createWriteTool(ctx.cwd)];
+			case "grep":
+				return [createGrepTool(ctx.cwd)];
+			case "find":
+				return [createFindTool(ctx.cwd)];
+			case "ls":
+				return [createLsTool(ctx.cwd)];
+			default:
+				return [];
+		}
+	});
+}
+
 export function prepareSubagentRunContext(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
@@ -160,12 +190,7 @@ export function prepareSubagentRunContext(
 
 	const targetModel = ctx.model;
 	return {
-		tools: [
-			createReadTool(ctx.cwd),
-			createBashTool(ctx.cwd),
-			createEditTool(ctx.cwd),
-			createWriteTool(ctx.cwd),
-		],
+		tools: buildActiveSubagentTools(pi, ctx),
 		targetModel,
 		thinkingLevel: pi.getThinkingLevel(),
 		systemPrompt: ctx.getSystemPrompt(),

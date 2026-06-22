@@ -73,7 +73,7 @@ async function generateContextSummary(
 		{ apiKey, headers, signal },
 	);
 
-	if (response.stopReason === "aborted") return null;
+	if (response.stopReason !== "stop") return null;
 
 	return response.content
 		.filter((c): c is { type: "text"; text: string } => c.type === "text")
