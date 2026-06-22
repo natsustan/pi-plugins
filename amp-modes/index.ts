@@ -569,7 +569,7 @@ function getCurrentSelectionSpec(pi: ExtensionAPI, ctx: ExtensionContext): ModeS
 	return { provider: s.provider, modelId: s.modelId, thinkingLevel: s.thinkingLevel };
 }
 
-function inferModeFromSelection(selection: SelectionSnapshot, data: ModesFile): string | null {
+function inferModeFromSelection(selection: SelectionSnapshot, data: ModesFile, activeMode?: string): string | null {
 	const { provider, modelId, thinkingLevel, supportsThinking } = selection;
 	if (!provider || !modelId) return null;
 
@@ -582,6 +582,12 @@ function inferModeFromSelection(selection: SelectionSnapshot, data: ModesFile): 
 			if (spec.provider && spec.provider !== provider) continue;
 			if (spec.modelId && spec.modelId !== modelId) continue;
 			candidates.push(name);
+		}
+		if (activeMode === DEEP_MODE_NAME && isDeepThinkingVariant(thinkingLevel)) {
+			for (const name of candidates) {
+				const spec = data.modes[name];
+				if (isDefaultDeepSpec(name, spec)) return name;
+			}
 		}
 		for (const name of candidates) {
 			const spec = data.modes[name];
@@ -633,7 +639,7 @@ async function syncModeFromCurrentSelection(pi: ExtensionAPI, ctx: ExtensionCont
 		return;
 	}
 
-	const inferred = inferModeFromSelection(getCurrentSelectionSnapshot(pi, ctx), runtime.data);
+	const inferred = inferModeFromSelection(getCurrentSelectionSnapshot(pi, ctx), runtime.data, runtime.currentMode);
 	if (inferred) {
 		runtime.currentMode = inferred;
 		runtime.lastRealMode = inferred;
