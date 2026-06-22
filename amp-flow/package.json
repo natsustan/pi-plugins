@@ -9,12 +9,13 @@
     "@earendil-works/pi-agent-core": "^0.79.9"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.79.9",
     "@earendil-works/pi-ai": "^0.79.9",
+    "@earendil-works/pi-coding-agent": "^0.79.9",
     "@earendil-works/pi-tui": "^0.79.9",
     "typebox": "*"
   },
   "devDependencies": {
+    "@types/node": "^22.20.0",
     "typescript": "^5.9.3"
   },
   "pi": {
