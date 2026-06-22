@@ -28,6 +28,7 @@ import {
 	prepareSubagentRunContext,
 	runSubagent,
 	type SingleResult,
+	type SubagentToolEventBridge,
 } from "./subagent.ts";
 
 const BTW_MESSAGE_TYPE = "btw-result";
@@ -112,7 +113,7 @@ function renderBtwResult(r: SingleResult, theme: Theme): Box {
 	return box;
 }
 
-export default function (pi: ExtensionAPI) {
+export default function (pi: ExtensionAPI, toolEvents?: SubagentToolEventBridge) {
 	// Widgets waiting for turn_end to remove themselves. When the agent is busy,
 	// the custom message won't render until the turn boundary, so we show the
 	// full rendered result as a widget meanwhile and drop it at turn_end.
@@ -164,7 +165,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const runContext = prepareSubagentRunContext(pi, ctx);
+			const runContext = prepareSubagentRunContext(pi, ctx, toolEvents);
 			if (!runContext) {
 				ctx.ui.notify("No model selected.", "error");
 				return;
@@ -193,6 +194,8 @@ export default function (pi: ExtensionAPI) {
 				model: runContext.targetModel,
 				thinkingLevel: runContext.thinkingLevel,
 				authResolver: runContext.authResolver,
+				toolEvents: runContext.toolEvents,
+				toolEventContext: ctx,
 				signal: controller.signal,
 				onProgress: (r) => {
 					if (!activeRuns.has(widgetKey)) return;

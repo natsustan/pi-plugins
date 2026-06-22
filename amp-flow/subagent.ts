@@ -15,6 +15,10 @@ import {
 	type AgentLoopConfig,
 	type AgentMessage,
 	type AgentTool,
+	type AfterToolCallContext,
+	type AfterToolCallResult,
+	type BeforeToolCallContext,
+	type BeforeToolCallResult,
 } from "@earendil-works/pi-agent-core";
 import { streamSimple } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -77,12 +81,33 @@ export interface PreparedSubagentRunContext {
 	thinkingLevel: string;
 	systemPrompt: string;
 	authResolver: (provider: string) => Promise<ModelAuth | undefined>;
+	toolEvents?: SubagentToolEventBridge;
 }
 
 type ModelAuth = {
 	apiKey?: string;
 	headers?: Record<string, string>;
 };
+
+export interface SubagentToolEventBridge {
+	hasToolCallHandlers(): boolean;
+	hasToolResultHandlers(): boolean;
+	emitToolCall(event: {
+		type: "tool_call";
+		toolName: string;
+		toolCallId: string;
+		input: Record<string, unknown>;
+	}, ctx: ExtensionContext): Promise<BeforeToolCallResult | undefined>;
+	emitToolResult(event: {
+		type: "tool_result";
+		toolName: string;
+		toolCallId: string;
+		input: Record<string, unknown>;
+		content: AfterToolCallContext["result"]["content"];
+		details: unknown;
+		isError: boolean;
+	}, ctx: ExtensionContext): Promise<AfterToolCallResult | undefined>;
+}
 
 // ---------------------------------------------------------------------------
 // Usage + formatting helpers (shared with btw.ts)
@@ -155,6 +180,10 @@ export function extractSessionMessages(ctx: ExtensionContext): any[] {
 		.filter((message: any) => !(message.role === "custom" && message.customType === "btw-result"));
 }
 
+function toRecord(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
 function buildActiveSubagentTools(pi: ExtensionAPI, ctx: ExtensionContext): AgentTool<any>[] {
 	const configuredTools = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
 	return pi.getActiveTools().flatMap((name): AgentTool<any>[] => {
@@ -185,6 +214,7 @@ function buildActiveSubagentTools(pi: ExtensionAPI, ctx: ExtensionContext): Agen
 export function prepareSubagentRunContext(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
+	toolEvents?: SubagentToolEventBridge,
 ): PreparedSubagentRunContext | undefined {
 	if (!ctx.model) return undefined;
 
@@ -198,6 +228,7 @@ export function prepareSubagentRunContext(
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(targetModel);
 			return auth.ok ? { apiKey: auth.apiKey, headers: auth.headers } : undefined;
 		},
+		toolEvents,
 	};
 }
 
@@ -212,6 +243,8 @@ export interface RunSubagentOptions {
 	model: Model<any>;
 	thinkingLevel: string;
 	authResolver: (provider: string) => Promise<ModelAuth | undefined> | ModelAuth | undefined;
+	toolEvents?: SubagentToolEventBridge;
+	toolEventContext?: ExtensionContext;
 	signal?: AbortSignal;
 	onProgress?: (result: SingleResult) => void;
 }
@@ -260,6 +293,32 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		convertToLlm,
 		reasoning: opts.thinkingLevel !== "off" ? (opts.thinkingLevel as any) : undefined,
 	};
+	if (opts.toolEvents && opts.toolEventContext) {
+		if (opts.toolEvents.hasToolCallHandlers()) {
+			config.beforeToolCall = async ({ toolCall, args }: BeforeToolCallContext, signal?: AbortSignal) => {
+				if (signal?.aborted) return { block: true, reason: "Tool call aborted." };
+				return opts.toolEvents!.emitToolCall({
+					type: "tool_call",
+					toolName: toolCall.name,
+					toolCallId: toolCall.id,
+					input: toRecord(args),
+				}, opts.toolEventContext!);
+			};
+		}
+		if (opts.toolEvents.hasToolResultHandlers()) {
+			config.afterToolCall = async ({ toolCall, args, result: toolResult, isError }: AfterToolCallContext) => {
+				return opts.toolEvents!.emitToolResult({
+					type: "tool_result",
+					toolName: toolCall.name,
+					toolCallId: toolCall.id,
+					input: toRecord(args),
+					content: toolResult.content,
+					details: toolResult.details,
+					isError,
+				}, opts.toolEventContext!);
+			};
+		}
+	}
 
 	try {
 		const stream = agentLoop([userMessage], context, config, opts.signal, async (model, llmContext, options) => {
@@ -505,8 +564,14 @@ export function renderResults(
 // ---------------------------------------------------------------------------
 
 const MAX_CONCURRENCY = 4;
+const MAX_PARENT_SUMMARY_CHARS = 4000;
 
-export default function (pi: ExtensionAPI) {
+function truncateForParent(text: string): string {
+	if (text.length <= MAX_PARENT_SUMMARY_CHARS) return text;
+	return `${text.slice(0, MAX_PARENT_SUMMARY_CHARS)}\n\n[Subagent output truncated; full output is available in details.]`;
+}
+
+export default function (pi: ExtensionAPI, toolEvents?: SubagentToolEventBridge) {
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
@@ -539,7 +604,7 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			const runContext = prepareSubagentRunContext(pi, ctx);
+			const runContext = prepareSubagentRunContext(pi, ctx, toolEvents);
 			if (!runContext) {
 				return {
 					content: [{ type: "text", text: "No model available." }],
@@ -566,35 +631,38 @@ export default function (pi: ExtensionAPI) {
 					content: [{ type: "text", text: statusText }],
 					details: { results: [...allResults] } as SubagentDetails,
 				});
-			};
+				};
 
-			// Emit immediately so the result block renders from the start.
-			emitUpdate();
-
-			const results = await mapWithConcurrency(tasks, MAX_CONCURRENCY, async (task, index) => {
-				const result = await runSubagent({
-					systemPrompt: runContext.systemPrompt,
-					task,
-					tools: runContext.tools,
-					model: runContext.targetModel,
-					thinkingLevel: runContext.thinkingLevel,
-					authResolver: runContext.authResolver,
-					signal,
-					onProgress: (r) => {
-						allResults[index] = r;
-						emitUpdate();
-					},
-				});
-				allResults[index] = result;
+				// Emit immediately so the result block renders from the start.
 				emitUpdate();
-				return result;
-			});
 
-			const successCount = results.filter((r) => r.exitCode === 0).length;
-			const failCount = results.length - successCount;
-			const summaries = results.map(
-				(r) => `[${r.exitCode === 0 ? "✓" : "✗"}] ${r.finalOutput || "(no output)"}`,
-			);
+				const results = await mapWithConcurrency(tasks, MAX_CONCURRENCY, async (task, index) => {
+					const result = await runSubagent({
+						systemPrompt: runContext.systemPrompt,
+						task,
+						tools: runContext.tools,
+						model: runContext.targetModel,
+						thinkingLevel: runContext.thinkingLevel,
+						authResolver: runContext.authResolver,
+						toolEvents: runContext.toolEvents,
+						toolEventContext: ctx,
+						signal,
+						onProgress: (r) => {
+							allResults[index] = r;
+							emitUpdate();
+						},
+					});
+					allResults[index] = result;
+					emitUpdate();
+					return result;
+				});
+
+				const successCount = results.filter((r) => r.exitCode === 0).length;
+				const failCount = results.length - successCount;
+				const summaries = results.map((r) => {
+					const output = r.finalOutput ? truncateForParent(r.finalOutput) : "(no output)";
+					return `[${r.exitCode === 0 ? "✓" : "✗"}] ${output}`;
+				});
 			const isError = results.length === 1
 				? results[0]!.exitCode !== 0
 				: failCount === results.length;
