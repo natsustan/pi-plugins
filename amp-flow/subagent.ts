@@ -16,6 +16,7 @@ import {
 	type AgentMessage,
 	type AgentTool,
 } from "@earendil-works/pi-agent-core";
+import { streamSimple } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	convertToLlm,
@@ -71,8 +72,13 @@ export interface PreparedSubagentRunContext {
 	targetModel: Model<any>;
 	thinkingLevel: string;
 	systemPrompt: string;
-	apiKeyResolver: (provider: string) => Promise<string | undefined>;
+	authResolver: (provider: string) => Promise<ModelAuth | undefined>;
 }
+
+type ModelAuth = {
+	apiKey?: string;
+	headers?: Record<string, string>;
+};
 
 // ---------------------------------------------------------------------------
 // Usage + formatting helpers (shared with btw.ts)
@@ -142,7 +148,8 @@ export function extractSessionMessages(ctx: ExtensionContext): any[] {
 	const branch = ctx.sessionManager.getBranch();
 	return branch
 		.filter((entry): entry is SessionEntry & { type: "message" } => entry.type === "message")
-		.map((entry) => entry.message);
+		.map((entry) => entry.message)
+		.filter((message: any) => !(message.role === "custom" && message.customType === "btw-result"));
 }
 
 export function prepareSubagentRunContext(
@@ -162,9 +169,9 @@ export function prepareSubagentRunContext(
 		targetModel,
 		thinkingLevel: pi.getThinkingLevel(),
 		systemPrompt: ctx.getSystemPrompt(),
-		apiKeyResolver: async (_provider: string) => {
+		authResolver: async (_provider: string) => {
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(targetModel);
-			return auth.ok ? auth.apiKey : undefined;
+			return auth.ok ? { apiKey: auth.apiKey, headers: auth.headers } : undefined;
 		},
 	};
 }
@@ -179,7 +186,7 @@ export interface RunSubagentOptions {
 	tools: AgentTool<any>[];
 	model: Model<any>;
 	thinkingLevel: string;
-	apiKeyResolver: (provider: string) => Promise<string | undefined> | string | undefined;
+	authResolver: (provider: string) => Promise<ModelAuth | undefined> | ModelAuth | undefined;
 	signal?: AbortSignal;
 	onProgress?: (result: SingleResult) => void;
 }
@@ -193,6 +200,12 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		usage: emptyUsage(),
 		model: `${opts.model.provider}/${opts.model.id}`,
 	};
+
+	if (opts.signal?.aborted) {
+		result.exitCode = 1;
+		result.stopReason = "aborted";
+		return result;
+	}
 
 	const userMessage: AgentMessage = {
 		role: "user",
@@ -220,15 +233,25 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 	const config: AgentLoopConfig = {
 		model: opts.model,
 		convertToLlm,
-		getApiKey: opts.apiKeyResolver,
 		reasoning: opts.thinkingLevel !== "off" ? (opts.thinkingLevel as any) : undefined,
 	};
 
 	try {
-		const stream = agentLoop([userMessage], context, config, opts.signal);
+		const stream = agentLoop([userMessage], context, config, opts.signal, async (model, llmContext, options) => {
+			const auth = await opts.authResolver(model.provider);
+			return streamSimple(model, llmContext, {
+				...options,
+				apiKey: auth?.apiKey,
+				headers: auth?.headers,
+			});
+		});
 
 		for await (const event of stream) {
-			if (opts.signal?.aborted) break;
+			if (opts.signal?.aborted) {
+				result.stopReason = "aborted";
+				result.exitCode = 1;
+				break;
+			}
 
 			if (event.type === "message_end") {
 				const msg = event.message as any;
@@ -264,6 +287,10 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 			} else if (event.type === "tool_execution_end") {
 				opts.onProgress?.(result);
 			}
+		}
+
+		if (opts.signal?.aborted && !result.stopReason) {
+			result.stopReason = "aborted";
 		}
 
 		if (result.stopReason === "error" || result.stopReason === "aborted") {
@@ -526,7 +553,7 @@ export default function (pi: ExtensionAPI) {
 					tools: runContext.tools,
 					model: runContext.targetModel,
 					thinkingLevel: runContext.thinkingLevel,
-					apiKeyResolver: runContext.apiKeyResolver,
+					authResolver: runContext.authResolver,
 					signal,
 					onProgress: (r) => {
 						allResults[index] = r;

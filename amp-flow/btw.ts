@@ -192,7 +192,7 @@ export default function (pi: ExtensionAPI) {
 				tools: runContext.tools,
 				model: runContext.targetModel,
 				thinkingLevel: runContext.thinkingLevel,
-				apiKeyResolver: runContext.apiKeyResolver,
+				authResolver: runContext.authResolver,
 				signal: controller.signal,
 				onProgress: (r) => {
 					if (!activeRuns.has(widgetKey)) return;

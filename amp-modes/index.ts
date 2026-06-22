@@ -80,8 +80,8 @@ type LoadedModes = {
 	data: ModesFile;
 	/** True when file explicitly contains: "modes": {} */
 	explicitlyEmptyModes: boolean;
-	/** True when the file did not exist and we fell back to bootstrap defaults. */
-	fromBootstrap: boolean;
+	/** True only when it is safe to create the missing modes file. */
+	canPersistBootstrap: boolean;
 	loadError?: string;
 };
 
@@ -307,7 +307,7 @@ async function loadModesFile(filePath: string): Promise<LoadedModes> {
 			return {
 				data: createBootstrapModesFile(),
 				explicitlyEmptyModes: false,
-				fromBootstrap: false,
+				canPersistBootstrap: false,
 				loadError: `${filePath} does not contain a valid modes object`,
 			};
 		}
@@ -316,7 +316,7 @@ async function loadModesFile(filePath: string): Promise<LoadedModes> {
 			return {
 				data: { version: 1, currentMode: "", modes: {}, lockThinkingWhenModeActive: readLockThinkingFlag(parsed) },
 				explicitlyEmptyModes: true,
-				fromBootstrap: false,
+				canPersistBootstrap: false,
 			};
 		}
 
@@ -333,21 +333,25 @@ async function loadModesFile(filePath: string): Promise<LoadedModes> {
 			return {
 				data: createBootstrapModesFile(),
 				explicitlyEmptyModes: false,
-				fromBootstrap: false,
+				canPersistBootstrap: false,
 				loadError: `${filePath} does not contain any named modes`,
 			};
 		}
 
 		ensureCurrentModeValid(file);
-		return { data: file, explicitlyEmptyModes: false, fromBootstrap: false };
+		return { data: file, explicitlyEmptyModes: false, canPersistBootstrap: false };
 	} catch (error: any) {
 		if (error?.code === "ENOENT") {
-			return { data: createBootstrapModesFile(), explicitlyEmptyModes: false, fromBootstrap: true };
+			return {
+				data: createBootstrapModesFile(),
+				explicitlyEmptyModes: false,
+				canPersistBootstrap: true,
+			};
 		}
 		return {
 			data: createBootstrapModesFile(),
 			explicitlyEmptyModes: false,
-			fromBootstrap: false,
+			canPersistBootstrap: false,
 			loadError: error instanceof Error ? error.message : String(error),
 		};
 	}
@@ -429,7 +433,7 @@ async function ensureRuntime(_pi: ExtensionAPI, ctx: ExtensionContext): Promise<
 
 		// First run: no modes.json anywhere. Persist the bootstrap defaults so
 		// the user can discover and edit them. Ignore write errors gracefully.
-		if (loaded.fromBootstrap && !loaded.explicitlyEmptyModes) {
+		if (loaded.canPersistBootstrap && !loaded.explicitlyEmptyModes) {
 			await saveModesFile(filePath, loaded.data).catch(() => {});
 			runtime.fileMtimeMs = await getMtimeMs(filePath);
 		}
