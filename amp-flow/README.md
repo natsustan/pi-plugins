@@ -8,7 +8,7 @@ Three cooperating extensions (plus a `session_query` tool and a
 
 | Extension | Entry point | What it does |
 |-----------|-------------|--------------|
-| handoff | `/handoff [-mode <name>] [-model <id>] <goal>` + `handoff` tool | Generate a focused summary of the current conversation and start a new session seeded with it (non-lossy alternative to compaction). Restores the current model+thinking, or applies `-mode`/`-model`. |
+| handoff | `/handoff [-mode <name>] [-model <provider/id>] <goal>` + `handoff` tool | Generate a focused summary of the current conversation and start a new session seeded with it (non-lossy alternative to compaction). Restores the current model+thinking, or applies `-mode`/`-model`. |
 | subagent | `subagent` tool | Spawn one or more isolated in-process subagents with the active built-in tools (read/write/edit/bash + grep/find/ls). Parallel, context-saving. |
 | btw | `/btw <prompt>` | Run a background subagent with a live progress widget; result lands as a rendered chat message. Sees the current conversation. |
 | session-query | `session_query` tool | Query any `.jsonl` session file (e.g. a handoff parent) for context/decisions, using that session's own model. |
@@ -34,7 +34,7 @@ npm install
 
 ### 3. Reload
 
-Run `/reload` in pi (or restart). The command and the two tools appear.
+Run `/reload` in pi (or restart). The command and tools appear.
 
 ## Usage
 

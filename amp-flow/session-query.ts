@@ -19,6 +19,16 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
+type SessionQueryDetails = {
+	sessionPath?: string;
+	question?: string;
+	answer?: string;
+	messageCount?: number;
+	error?: boolean;
+	empty?: boolean;
+	cancelled?: boolean;
+};
+
 const QUERY_SYSTEM_PROMPT = `You are a session context assistant. Given the conversation history from a pi coding session and a question, provide a concise answer based on the session contents.
 
 Focus on:
@@ -48,14 +58,12 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, _options, theme) {
 			const container = new Container();
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			// Parse the "**Query:** q\n\n---\n\nanswer" envelope we build below.
-			const match = text.match(/\*\*Query:\*\* (.+?)\n\n---\n\n([\s\S]+)/);
-			if (match) {
-				const [, query, answer] = match;
-				container.addChild(new Text(theme.bold("Query: ") + theme.fg("accent", query), 0, 0));
+			const details = result.details as SessionQueryDetails | undefined;
+			if (details?.question && details.answer !== undefined) {
+				container.addChild(new Text(theme.bold("Query: ") + theme.fg("accent", details.question), 0, 0));
 				container.addChild(new Spacer(1));
 				container.addChild(
-					new Markdown(answer.trim(), 0, 0, getMarkdownTheme(), {
+					new Markdown(details.answer.trim(), 0, 0, getMarkdownTheme(), {
 						color: (t: string) => theme.fg("toolOutput", t),
 					}),
 				);
@@ -77,15 +85,6 @@ export default function (pi: ExtensionAPI) {
 				return errorResult(`Error: Invalid session path. Expected a .jsonl file, got: ${sessionPath}`);
 			}
 
-			try {
-				const fs = await import("node:fs");
-				if (!fs.existsSync(sessionPath)) {
-					return errorResult(`Error: Session file not found: ${sessionPath}`);
-				}
-			} catch (err) {
-				return errorResult(`Error checking session file: ${err}`);
-			}
-
 			let sessionManager: SessionManager;
 			try {
 				sessionManager = SessionManager.open(sessionPath);
@@ -94,9 +93,12 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const branch = sessionManager.getBranch();
-			const messages = branch
-				.filter((e): e is SessionEntry & { type: "message" } => e.type === "message")
-				.map((e) => e.message);
+			const messages = [];
+			let lastModelChange: (SessionEntry & { type: "model_change" }) | undefined;
+			for (const entry of branch) {
+				if (entry.type === "message") messages.push(entry.message);
+				if (entry.type === "model_change") lastModelChange = entry;
+			}
 
 			if (messages.length === 0) {
 				return {
@@ -110,12 +112,8 @@ export default function (pi: ExtensionAPI) {
 			// Prefer the queried session's own model (last model_change entry);
 			// fall back to the current session's model.
 			let queryModel = ctx.model;
-			const modelChanges = branch.filter(
-				(e): e is SessionEntry & { type: "model_change" } => e.type === "model_change",
-			);
-			if (modelChanges.length > 0) {
-				const last = modelChanges[modelChanges.length - 1]!;
-				const sessionModel = ctx.modelRegistry.find(last.provider, last.modelId);
+			if (lastModelChange) {
+				const sessionModel = ctx.modelRegistry.find(lastModelChange.provider, lastModelChange.modelId);
 				if (sessionModel) queryModel = sessionModel;
 			}
 			if (!queryModel) {
@@ -156,8 +154,8 @@ export default function (pi: ExtensionAPI) {
 					.join("\n");
 
 				return {
-					content: [{ type: "text" as const, text: `**Query:** ${question}\n\n---\n\n${answer}` }],
-					details: { sessionPath, question, messageCount: messages.length },
+					content: [{ type: "text" as const, text: answer }],
+					details: { sessionPath, question, answer, messageCount: messages.length },
 				};
 			} catch (err) {
 				return errorResult(`Error querying session: ${err}`);

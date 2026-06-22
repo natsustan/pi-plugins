@@ -10,10 +10,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
 export type ModeSpec = {
 	provider?: string;
 	modelId?: string;
-	thinkingLevel?: string;
+	thinkingLevel?: ThinkingLevel;
 };
 
 export type HandoffOptions = {
@@ -33,14 +36,20 @@ function getGlobalAgentDir(): string {
 	return path.join(os.homedir(), ".pi", "agent");
 }
 
+function normalizeThinkingLevel(level: unknown): ThinkingLevel | undefined {
+	return typeof level === "string" && (THINKING_LEVELS as readonly string[]).includes(level)
+		? (level as ThinkingLevel)
+		: undefined;
+}
+
 /**
  * Load a single mode spec by name from project or global modes.json.
  * Returns undefined if the mode (or the file) is absent.
  */
-export async function loadModeSpec(
+export function loadModeSpec(
 	cwd: string,
 	modeName: string,
-): Promise<ModeSpec | undefined> {
+): ModeSpec | undefined {
 	const candidates = [
 		path.join(cwd, ".pi", "modes.json"),
 		path.join(getGlobalAgentDir(), "modes.json"),
@@ -55,7 +64,7 @@ export async function loadModeSpec(
 				return {
 					provider: typeof spec.provider === "string" ? spec.provider : undefined,
 					modelId: typeof spec.modelId === "string" ? spec.modelId : undefined,
-					thinkingLevel: typeof spec.thinkingLevel === "string" ? spec.thinkingLevel : undefined,
+					thinkingLevel: normalizeThinkingLevel(spec.thinkingLevel),
 				};
 			}
 		} catch {
