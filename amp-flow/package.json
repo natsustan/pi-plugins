@@ -21,6 +21,9 @@
   "pi": {
     "extensions": [
       "./index.ts"
+    ],
+    "skills": [
+      "./skills/session-query"
     ]
   }
 }

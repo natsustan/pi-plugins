@@ -14,6 +14,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import handoff from "./handoff.ts";
 import subagent, { type SubagentToolEventBridge } from "./subagent.ts";
 import btw from "./btw.ts";
+import sessionQuery from "./session-query.ts";
 
 type ExtensionHandler = (event: any, ctx: any) => unknown | Promise<unknown>;
 
@@ -29,10 +30,14 @@ function createToolEventBridge(pi: ExtensionAPI): SubagentToolEventBridge {
 	};
 
 	return {
-		// Only handlers registered after amp-flow loads are visible here. Earlier
-		// policy/sandbox hooks may still be active for the parent session, so do
-		// not expose mutating subagent tools based on this partial handler list.
-		canForwardToolCalls: () => false,
+		// Expose mutating tools (bash/edit/write) and forward tool_call/tool_result
+		// events to any handlers we captured. Handlers registered BEFORE amp-flow
+		// loaded aren't visible (we monkeypatched pi.on too late), so they won't
+		// apply to subagent calls — subagents otherwise run with fresh builtin
+		// tools, same as the reference implementation. Load amp-flow BEFORE a
+		// policy/sandbox extension if you want that extension's tool_call hooks to
+		// cover subagents too.
+		canForwardToolCalls: () => true,
 		hasToolResultHandlers: () => toolResultHandlers.length > 0,
 		async emitToolCall(event, ctx) {
 			let result;
@@ -69,4 +74,5 @@ export default function (pi: ExtensionAPI) {
 	handoff(pi);
 	subagent(pi, toolEvents);
 	btw(pi, toolEvents);
+	sessionQuery(pi);
 }
