@@ -68,6 +68,39 @@ const CORNERS = {
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 80;
 
+// ---- mode label (sourced from the amp-flow modes extension) -----------------
+//
+// The modes extension publishes the active mode to a process-global mailbox
+// (Symbol.for) and fires an event whenever it changes. We read the mailbox on
+// each render to label the top border, and subscribe to the event so a label
+// change without a model/thinking event still forces a repaint. Both sides
+// share the Symbol + channel name as a string contract — no import needed.
+const MODE_MAILBOX = Symbol.for("amp.modes.current");
+const MODE_CHANGE_CHANNEL = "amp:modes-change";
+const SIMPLE_MODE_COLOR_ANSI: Record<string, string> = {
+	red: "\u001b[31m",
+	yellow: "\u001b[33m",
+	green: "\u001b[32m",
+	cyan: "\u001b[36m",
+	blue: "\u001b[34m",
+	purple: "\u001b[35m",
+	gray: "\u001b[90m",
+	white: "\u001b[37m",
+};
+type ModeMailboxValue = { mode: string; color?: string } | null;
+
+function readModeLabel(): ModeMailboxValue {
+	return (globalThis as any)[MODE_MAILBOX] ?? null;
+}
+
+/** Color a mode badge: simple color name → raw ANSI; otherwise thinking color. */
+function renderModeBadge(label: ModeMailboxValue, thinkingFg: (s: string) => string): string {
+	if (!label) return "";
+	const ansi = label.color ? SIMPLE_MODE_COLOR_ANSI[label.color] : undefined;
+	const body = ` ${label.mode} `;
+	return ansi ? `${ansi}${body}\u001b[39m` : thinkingFg(body);
+}
+
 // ---- helpers --------------------------------------------------------------
 
 /**
@@ -220,6 +253,9 @@ export default function (pi: ExtensionAPI) {
 		activeTui?.requestRender();
 	});
 
+	// Re-render when the modes extension changes the active mode label.
+	pi.events.on(MODE_CHANGE_CHANNEL, () => activeTui?.requestRender());
+
 	pi.on("session_shutdown", () => {
 		stopSpinner();
 		activeTui = undefined;
@@ -301,8 +337,17 @@ export default function (pi: ExtensionAPI) {
 				// thinking-level color.
 				const level = pi.getThinkingLevel();
 				const thinkingSuffix = level !== "off" ? ` (${level})` : "";
-				const modelText = ctx.model ? ` ${ctx.model.id}${thinkingSuffix} ` : "";
-				const model = modelText ? thinkingFg(modelText) + frame(CORNERS.dash) : "";
+				const modelText = ctx.model ? `${ctx.model.id}${thinkingSuffix}` : "";
+				// A named mode is itself a model+thinking preset, so when one is
+				// active (published by the amp-flow modes extension) we show ONLY the
+				// mode badge — showing both is redundant. When the selection doesn't
+				// match any mode ("custom"), fall back to the model name + level so
+				// the top-right isn't blank.
+				const modeBadge = renderModeBadge(readModeLabel(), thinkingFg);
+				const rightLabel = modeBadge
+					? modeBadge
+					: (modelText ? thinkingFg(` ${modelText} `) : "");
+				const model = rightLabel ? rightLabel + frame(CORNERS.dash) : "";
 				out.push(renderBorder(CORNERS.topLeft, CORNERS.topRight, topLeft, model, width, frame));
 
 				// --- content lines wrapped in │ … │

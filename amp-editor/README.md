@@ -7,11 +7,21 @@ docked to the bottom-right, and a braille spinner on the top-left while the
 agent runs.
 
 ```
-╭ ⠋────────────────────────── claude-sonnet-4-5 (high) ╮
+╭ ⠋────────────────────────── smart ───────────────────╮
 │ █                                                    │
 │                                                      │
 ╰────────── ~/projects/pi-plugins (main) · 12% ────╯
 ```
+
+When the **amp-flow** modes extension is loaded alongside this one and a named
+mode is active, its name is shown as a colored badge (` smart ` above) docked
+top-right, replacing the model name + thinking level — a mode is itself a
+model+thinking preset, so showing both would be redundant. The badge uses the
+mode's configured color, or the thinking-level color when the mode has none.
+When the current selection doesn't match any mode ("custom"), the badge is
+hidden and the model name + thinking level are shown instead, so the top-right
+is never blank. The two packages communicate via a process-global mailbox +
+event — no import needed, just load both.
 
 The box frame is plain (default fg). The **thinking-level color** (pi's
 `EditorTheme.borderColor`, set per active thinking level) highlights the model

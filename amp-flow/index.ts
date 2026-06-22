@@ -14,9 +14,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import handoff from "./handoff.ts";
 import subagent from "./subagent.ts";
 import btw from "./btw.ts";
+import modes from "./modes.ts";
 
 export default function (pi: ExtensionAPI) {
 	handoff(pi);
 	subagent(pi);
 	btw(pi);
+	modes(pi);
 }
