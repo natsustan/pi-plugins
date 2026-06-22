@@ -91,6 +91,7 @@ type ModelAuth = {
 
 export interface SubagentToolEventBridge {
 	canForwardToolCalls(): boolean;
+	hasToolCallHandlers(): boolean;
 	hasToolResultHandlers(): boolean;
 	emitToolCall(event: {
 		type: "tool_call";
@@ -302,7 +303,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		reasoning: opts.thinkingLevel !== "off" ? (opts.thinkingLevel as any) : undefined,
 	};
 	if (opts.toolEvents && opts.toolEventContext) {
-		if (opts.toolEvents.canForwardToolCalls()) {
+		if (opts.toolEvents.hasToolCallHandlers()) {
 			config.beforeToolCall = async ({ toolCall, args }: BeforeToolCallContext, signal?: AbortSignal) => {
 				if (signal?.aborted) return { block: true, reason: "Tool call aborted." };
 				return opts.toolEvents!.emitToolCall({

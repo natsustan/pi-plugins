@@ -30,14 +30,19 @@ function createToolEventBridge(pi: ExtensionAPI): SubagentToolEventBridge {
 	};
 
 	return {
-		// Expose mutating tools (bash/edit/write) and forward tool_call/tool_result
-		// events to any handlers we captured. Handlers registered BEFORE amp-flow
-		// loaded aren't visible (we monkeypatched pi.on too late), so they won't
-		// apply to subagent calls — subagents otherwise run with fresh builtin
-		// tools, same as the reference implementation. Load amp-flow BEFORE a
-		// policy/sandbox extension if you want that extension's tool_call hooks to
-		// cover subagents too.
+		// Mutating subagent tools (bash/edit/write) stay available to match the
+		// reference subagent implementation. tool_call/tool_result events are
+		// forwarded to any handlers we captured below.
+		//
+		// Caveat: handlers registered BEFORE amp-flow loaded are not visible here
+		// (we monkeypatched pi.on too late). In the common no-policy case that's
+		// fine (the parent has no policy either). But if a policy/sandbox
+		// extension is loaded BEFORE amp-flow, its tool_call hooks won't cover
+		// subagent calls even though they cover the parent — load amp-flow FIRST
+		// if you want a policy extension's hooks to apply to subagents too.
+		// Fully closing this gap needs a core API to enumerate existing handlers.
 		canForwardToolCalls: () => true,
+		hasToolCallHandlers: () => toolCallHandlers.length > 0,
 		hasToolResultHandlers: () => toolResultHandlers.length > 0,
 		async emitToolCall(event, ctx) {
 			let result;

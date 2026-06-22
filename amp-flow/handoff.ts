@@ -190,7 +190,7 @@ async function applyHandoffOptions(
 	options: HandoffOptions,
 ): Promise<void> {
 	if (options.mode) {
-		const spec = await loadModeSpec(ctx.cwd, options.mode);
+		const spec = loadModeSpec(ctx.cwd, options.mode);
 		if (spec) {
 			if (spec.provider && spec.modelId) {
 				const model = ctx.modelRegistry.find(spec.provider, spec.modelId);
@@ -231,23 +231,19 @@ async function applyHandoffOptions(
 	}
 }
 
-/** Parse optional -mode / -model flags out of the /handoff arg string. */
+/** Parse optional -mode / -model flags out of the /handoff arg string.
+ * Only flags at the very start of the string are consumed (in any order), so a
+ * literal "-mode" later inside the goal isn't stripped. */
 function parseHandoffArgs(args: string): { options: HandoffOptions; goal: string } {
 	const options: HandoffOptions = {};
-	let remaining = args;
-
-	const modeMatch = remaining.match(/(?:^|\s)-mode\s+(\S+)/);
-	if (modeMatch) {
-		options.mode = modeMatch[1];
-		remaining = remaining.replace(modeMatch[0], " ");
+	let remaining = args.trim();
+	while (true) {
+		const m = remaining.match(/^-(mode|model)\s+(\S+)\s*/);
+		if (!m) break;
+		if (m[1] === "mode") options.mode = m[2];
+		else options.model = m[2];
+		remaining = remaining.slice(m[0].length);
 	}
-
-	const modelMatch = remaining.match(/(?:^|\s)-model\s+(\S+)/);
-	if (modelMatch) {
-		options.model = modelMatch[1];
-		remaining = remaining.replace(modelMatch[0], " ");
-	}
-
 	return { options, goal: remaining.trim() };
 }
 
@@ -324,9 +320,14 @@ async function performHandoff(
 				}
 				: undefined;
 		setPendingHandoffGlobal({ prompt: finalPrompt, options: hasOptions ? options : undefined, restore });
-		const result = await cmdCtx.newSession({ parentSession });
-		if (result.cancelled) {
+		try {
+			const result = await cmdCtx.newSession({ parentSession });
+			if (result.cancelled) {
+				setPendingHandoffGlobal(null);
+			}
+		} catch (err) {
 			setPendingHandoffGlobal(null);
+			throw err;
 		}
 	} else {
 		// Tool path: stash for the agent_end handler. The runtime is NOT
@@ -399,6 +400,8 @@ export default function (pi: ExtensionAPI) {
 		handoffTimestamp = null;
 
 		if (event.reason === "new") {
+			// Command-path handoff: the new session picks up the stashed prompt
+			// + model options here, applied with the fresh `pi`.
 			const stash = getPendingHandoffGlobal();
 			if (stash) {
 				setPendingHandoffGlobal(null);
@@ -410,7 +413,18 @@ export default function (pi: ExtensionAPI) {
 				}
 				pi.sendUserMessage(stash.prompt);
 			}
+		} else {
+			// Defensive: a stash only ever ships with a reason === "new" start. If
+			// one leaked (e.g. a prior newSession() that never fired its start
+			// event), clear it now so it can't fire on a later, unrelated "/new"
+			// and inject a stale handoff prompt into a fresh session.
+			setPendingHandoffGlobal(null);
 		}
+	});
+
+	// Belt-and-suspenders: never let a leaked stash survive a shutdown.
+	pi.on("session_shutdown", () => {
+		setPendingHandoffGlobal(null);
 	});
 
 	// /handoff command — primary entry point.

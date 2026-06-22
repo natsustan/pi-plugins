@@ -14,7 +14,7 @@ import {
 	convertToLlm,
 	getMarkdownTheme,
 	serializeConversation,
-	type SessionEntry,
+	type ModelChangeEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -24,6 +24,7 @@ type SessionQueryDetails = {
 	question?: string;
 	answer?: string;
 	messageCount?: number;
+	truncated?: boolean;
 	error?: boolean;
 	empty?: boolean;
 	cancelled?: boolean;
@@ -37,6 +38,20 @@ Focus on:
 - Key context the user is asking about
 
 Be concise and direct. If the information isn't in the session, say so.`;
+
+/** Cap serialized session size sent to the model (≈ 15-20k tokens). Parent
+ * sessions handed off from can be very long; without a cap this easily blows
+ * the queried model's context window and runs up cost. Keeps the tail (most
+ * recent, usually most relevant) content. */
+const MAX_SESSION_CHARS = 60000;
+
+function truncateSessionText(text: string): { text: string; truncated: boolean } {
+	if (text.length <= MAX_SESSION_CHARS) return { text, truncated: false };
+	return {
+		text: `[... earlier session content truncated; showing the most recent ${MAX_SESSION_CHARS} characters ...]\n\n${text.slice(text.length - MAX_SESSION_CHARS)}`,
+		truncated: true,
+	};
+}
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
@@ -70,6 +85,14 @@ export default function (pi: ExtensionAPI) {
 			} else {
 				container.addChild(new Text(theme.fg("toolOutput", text), 0, 0));
 			}
+			// Meta footer: message count (and truncation flag).
+			const count = details?.messageCount;
+			if (typeof count === "number") {
+				const metaParts = [`${count} message${count === 1 ? "" : "s"}`];
+				if (details?.truncated) metaParts.push("truncated");
+				container.addChild(new Spacer(1));
+				container.addChild(new Text(theme.fg("dim", metaParts.join(" · ")), 0, 0));
+			}
 			return container;
 		},
 
@@ -94,7 +117,7 @@ export default function (pi: ExtensionAPI) {
 
 			const branch = sessionManager.getBranch();
 			const messages = [];
-			let lastModelChange: (SessionEntry & { type: "model_change" }) | undefined;
+			let lastModelChange: ModelChangeEntry | undefined;
 			for (const entry of branch) {
 				if (entry.type === "message") messages.push(entry.message);
 				if (entry.type === "model_change") lastModelChange = entry;
@@ -107,7 +130,9 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			const conversationText = serializeConversation(convertToLlm(messages));
+			const { text: conversationText, truncated } = truncateSessionText(
+				serializeConversation(convertToLlm(messages)),
+			);
 
 			// Prefer the queried session's own model (last model_change entry);
 			// fall back to the current session's model.
@@ -155,7 +180,7 @@ export default function (pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text" as const, text: answer }],
-					details: { sessionPath, question, answer, messageCount: messages.length },
+					details: { sessionPath, question, answer, messageCount: messages.length, truncated },
 				};
 			} catch (err) {
 				return errorResult(`Error querying session: ${err}`);

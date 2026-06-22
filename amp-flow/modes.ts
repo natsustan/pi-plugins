@@ -9,9 +9,13 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
-type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+// Source of truth for the type is ExtensionAPI (mirrors pi-agent-core's
+// ThinkingLevel union); the runtime list below validates modes.json values.
+type ThinkingLevel = ReturnType<ExtensionAPI["getThinkingLevel"]>;
+// Runtime mirror of pi-agent-core's ThinkingLevel union. Keep in sync with it.
+const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 export type ModeSpec = {
 	provider?: string;
@@ -56,19 +60,28 @@ export function loadModeSpec(
 	];
 
 	for (const modesPath of candidates) {
+		let raw: string;
 		try {
-			const raw = fs.readFileSync(modesPath, "utf8");
-			const parsed = JSON.parse(raw);
-			if (parsed.modes && typeof parsed.modes === "object" && parsed.modes[modeName]) {
-				const spec = parsed.modes[modeName];
-				return {
-					provider: typeof spec.provider === "string" ? spec.provider : undefined,
-					modelId: typeof spec.modelId === "string" ? spec.modelId : undefined,
-					thinkingLevel: normalizeThinkingLevel(spec.thinkingLevel),
-				};
-			}
+			raw = fs.readFileSync(modesPath, "utf8");
 		} catch {
+			continue; // file absent — try the next candidate
+		}
+		let parsed: any;
+		try {
+			parsed = JSON.parse(raw);
+		} catch (err) {
+			// File exists but is malformed. Surface this distinctly so a downstream
+			// "unknown mode" warning isn't misleading.
+			console.warn(`amp-flow: failed to parse ${modesPath}: ${err}`);
 			continue;
+		}
+		if (parsed?.modes && typeof parsed.modes === "object" && parsed.modes[modeName]) {
+			const spec = parsed.modes[modeName];
+			return {
+				provider: typeof spec.provider === "string" ? spec.provider : undefined,
+				modelId: typeof spec.modelId === "string" ? spec.modelId : undefined,
+				thinkingLevel: normalizeThinkingLevel(spec.thinkingLevel),
+			};
 		}
 	}
 	return undefined;
