@@ -574,6 +574,15 @@ async function applyMode(pi: ExtensionAPI, ctx: ExtensionContext, mode: string):
 	runtime.currentMode = mode;
 	runtime.lastRealMode = mode;
 
+	// Publish the committed mode BEFORE the async model/thinking work. amp-editor
+	// re-renders on the model_select / thinking_level_select events that fire
+	// mid-applyMode (it has no `applying` guard). If we wait until the trailing
+	// syncMode below, those intermediate renders read a STALE mailbox and paint
+	// the *previous* mode label over the *new* model/thinking — e.g. cycling
+	// smart→deep briefly shows " smart (medium) " (smart label, deep's thinking).
+	// Publishing on commit makes every intermediate render show the target mode.
+	publishMode(pi);
+
 	runtime.applying = true;
 	let modelAppliedOk = true;
 	try {
