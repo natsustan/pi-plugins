@@ -196,6 +196,8 @@ export default function (pi: ExtensionAPI) {
 	// agent.reset()), but the context event controls what the LLM sees.
 	pi.on("context", (event) => {
 		if (handoffTimestamp === null) return;
+		// Timestamp-less messages predate the handoff marker in old session state,
+		// so exclude them from the new LLM context.
 		const filtered = event.messages.filter((m: any) => (m.timestamp ?? 0) >= handoffTimestamp!);
 		if (filtered.length > 0) return { messages: filtered };
 		// Don't return an empty array — let the original pass if filter is empty.

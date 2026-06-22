@@ -357,6 +357,7 @@ function aggregateUsage(results: SingleResult[]): UsageStats {
 		total.output += r.usage.output;
 		total.cacheRead += r.usage.cacheRead;
 		total.cacheWrite += r.usage.cacheWrite;
+		// contextTokens is a per-result snapshot/limit signal, not additive usage.
 		total.cost += r.usage.cost;
 		total.turns += r.usage.turns;
 	}

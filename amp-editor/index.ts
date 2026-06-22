@@ -81,7 +81,7 @@ const MODE_MAILBOX = Symbol.for("amp.modes.current");
 const MODE_CHANGE_CHANNEL = "amp:modes-change";
 type RGB = { r: number; g: number; b: number };
 type ModeUiHints = {
-	labelColors: { default?: RGB; light?: RGB };
+	labelColors: { default?: RGB };
 };
 type ModeMailboxValue = { mode: string; uiHints?: ModeUiHints } | null;
 
@@ -93,7 +93,7 @@ function readModeLabel(): ModeMailboxValue {
 function renderModeBadge(label: ModeMailboxValue, thinkingFg: (s: string) => string): string {
 	if (!label) return "";
 	const body = ` ${label.mode} `;
-	const rgb = label.uiHints?.labelColors.default ?? label.uiHints?.labelColors.light;
+	const rgb = label.uiHints?.labelColors.default;
 	return rgb ? `\u001b[38;2;${rgb.r};${rgb.g};${rgb.b}m${body}\u001b[39m` : thinkingFg(body);
 }
 

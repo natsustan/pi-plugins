@@ -16,7 +16,6 @@
  *   /mode store [name] save current selection into a mode
  *   /mode configure    configuration UI
  *   Ctrl+Shift+S       open picker
- *   Ctrl+S             cycle deep → rush → smart
  *
  * Config: .pi/modes.json (project) → ~/.pi/agent/modes.json (global).
  * Setting `"modes": {}` disables the overlay (labels, shortcuts) while
@@ -43,7 +42,7 @@ const MODE_CHANGE_CHANNEL = "amp:modes-change";
 
 type RGB = { r: number; g: number; b: number };
 type ModeUiHints = {
-	labelColors: { default?: RGB; light?: RGB };
+	labelColors: { default?: RGB };
 };
 
 export type ModeMailboxValue = { mode: string; uiHints?: ModeUiHints } | null;
@@ -86,13 +85,14 @@ type LoadedModes = {
 
 const CUSTOM_MODE_NAME = "custom" as const;
 
-// Bootstrap defaults written when no modes.json exists. Matches the user's
-// enabled models (zai/glm-5.2, openai-codex/gpt-5.5). Edit ~/.pi/agent/modes.json
-// or .pi/modes.json to customize.
-const BOOTSTRAP_MODES: Array<{ name: ModeName; spec: Required<Pick<ModeSpec, "provider" | "modelId" | "thinkingLevel">> }> = [
-	{ name: "rush", spec: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "off" } },
-	{ name: "smart", spec: { provider: "zai", modelId: "glm-5.2", thinkingLevel: "high" } },
-	{ name: "deep", spec: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "medium" } },
+// Bootstrap defaults written when no modes.json exists. They intentionally
+// avoid provider/model pins so the extension works with whatever model the
+// user has configured. Edit ~/.pi/agent/modes.json or .pi/modes.json to bind
+// modes to specific models.
+const BOOTSTRAP_MODES: Array<{ name: ModeName; spec: Pick<ModeSpec, "thinkingLevel"> }> = [
+	{ name: "rush", spec: { thinkingLevel: "off" } },
+	{ name: "smart", spec: { thinkingLevel: "high" } },
+	{ name: "deep", spec: { thinkingLevel: "medium" } },
 ];
 
 const MODE_UI_CONFIGURE = "Configure modes…";
@@ -111,13 +111,11 @@ const MODE_UI_HINTS: Record<string, ModeUiHints> = {
 	smart: {
 		labelColors: {
 			default: { r: 200, g: 230, b: 68 },
-			light: { r: 0, g: 140, b: 70 },
 		},
 	},
 	rush: {
 		labelColors: {
 			default: { r: 255, g: 215, b: 0 },
-			light: { r: 180, g: 100, b: 0 },
 		},
 	},
 };
@@ -377,9 +375,6 @@ const runtime: ModeRuntime = {
 // We track model select events to avoid stale ctx.model snapshots.
 let lastObservedModel: { provider?: string; modelId?: string } = {};
 
-// Serializes cycle shortcut repeats so rapid key repeats can't race mode inference.
-let modeCycleQueue: Promise<void> = Promise.resolve();
-
 // Re-entrancy guard for the thinking lock: our revert calls pi.setThinkingLevel(),
 // which re-emits thinking_level_select synchronously. This flag short-circuits the
 // re-entry so we don't loop.
@@ -526,7 +521,8 @@ function inferModeFromSelection(selection: SelectionSnapshot, data: ModesFile): 
 		for (const name of names) {
 			const spec = data.modes[name];
 			if (!spec) continue;
-			if (spec.provider !== provider || spec.modelId !== modelId) continue;
+			if (spec.provider && spec.provider !== provider) continue;
+			if (spec.modelId && spec.modelId !== modelId) continue;
 			if ((spec.thinkingLevel ?? undefined) !== thinkingLevel) continue;
 			return name;
 		}
@@ -537,7 +533,8 @@ function inferModeFromSelection(selection: SelectionSnapshot, data: ModesFile): 
 	for (const name of names) {
 		const spec = data.modes[name];
 		if (!spec) continue;
-		if (spec.provider !== provider || spec.modelId !== modelId) continue;
+		if (spec.provider && spec.provider !== provider) continue;
+		if (spec.modelId && spec.modelId !== modelId) continue;
 		candidates.push(name);
 	}
 	if (candidates.length === 0) return null;
@@ -668,27 +665,6 @@ async function applyMode(pi: ExtensionAPI, ctx: ExtensionContext, mode: string):
 	// Ensure model+thinking pairing still resolves exactly (handles clamping/overrides).
 	// syncModeFromCurrentSelection() publishes the mode, so don't publish again here.
 	await syncModeFromCurrentSelection(pi, ctx);
-}
-
-const QUICK_CYCLE_MODES = ["deep", "rush", "smart"];
-
-async function cycleModeNow(pi: ExtensionAPI, ctx: ExtensionContext, direction: 1 | -1 = 1): Promise<void> {
-	await ensureRuntime(pi, ctx);
-	if (!runtime.overlayEnabled) return;
-	const quickNames = QUICK_CYCLE_MODES.filter((name) => runtime.data.modes[name]);
-	const names = quickNames.length > 0 ? quickNames : orderedModeNames(runtime.data.modes);
-	if (names.length === 0) return;
-
-	const baseMode = runtime.currentMode === CUSTOM_MODE_NAME ? runtime.lastRealMode : runtime.currentMode;
-	const idx = names.includes(baseMode) ? names.indexOf(baseMode) : -1;
-	const next = names[(idx + direction + names.length) % names.length] ?? names[0]!;
-	await applyMode(pi, ctx, next);
-}
-
-async function cycleMode(pi: ExtensionAPI, ctx: ExtensionContext, direction: 1 | -1 = 1): Promise<void> {
-	const run = modeCycleQueue.then(() => cycleModeNow(pi, ctx, direction), () => cycleModeNow(pi, ctx, direction));
-	modeCycleQueue = run.then(() => undefined, () => undefined);
-	await run;
 }
 
 // =============================================================================
@@ -1055,13 +1031,6 @@ export default function (pi: ExtensionAPI) {
 		description: "Select prompt mode",
 		handler: async (ctx) => {
 			await selectModeUI(pi, ctx);
-		},
-	});
-
-	pi.registerShortcut("ctrl+s", {
-		description: "Cycle prompt mode (deep → rush → smart)",
-		handler: async (ctx) => {
-			await cycleMode(pi, ctx, 1);
 		},
 	});
 

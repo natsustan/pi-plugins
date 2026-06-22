@@ -13,19 +13,21 @@ and the mode manager can be installed and versioned independently.
 /mode store fast   # save current selection into a mode
 /mode configure    # add / rename / delete / edit modes
 Ctrl+Shift+S       # open picker
-Ctrl+S             # cycle deep → rush → smart → …
 ```
 
 Bootstrap modes (written to `~/.pi/agent/modes.json` on first use; edit there
-or in `.pi/modes.json` per project):
+or in `.pi/modes.json` per project) are model-agnostic by default:
 
 ```json
 {
-  "rush":  { "provider": "openai-codex", "modelId": "gpt-5.5", "thinkingLevel": "off" },
-  "smart": { "provider": "zai", "modelId": "glm-5.2", "thinkingLevel": "high" },
-  "deep":  { "provider": "openai-codex", "modelId": "gpt-5.5", "thinkingLevel": "medium" }
+  "rush":  { "thinkingLevel": "off" },
+  "smart": { "thinkingLevel": "high" },
+  "deep":  { "thinkingLevel": "medium" }
 }
 ```
+
+Add `provider` and `modelId` to any mode if you want that mode to switch models
+as well as thinking level.
 
 The active mode is reverse-matched from your current model + thinking whenever
 they change (Ctrl+P, `/model`, other extensions), so the label stays accurate.
