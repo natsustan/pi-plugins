@@ -82,8 +82,6 @@ const MODE_CHANGE_CHANNEL = "amp:modes-change";
 type RGB = { r: number; g: number; b: number };
 type ModeUiHints = {
 	labelColors: { default?: RGB; light?: RGB };
-	primaryColor: RGB;
-	secondaryColor: RGB;
 };
 type ModeMailboxValue = { mode: string; uiHints?: ModeUiHints } | null;
 

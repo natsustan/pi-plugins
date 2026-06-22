@@ -44,8 +44,6 @@ const MODE_CHANGE_CHANNEL = "amp:modes-change";
 type RGB = { r: number; g: number; b: number };
 type ModeUiHints = {
 	labelColors: { default?: RGB; light?: RGB };
-	primaryColor: RGB;
-	secondaryColor: RGB;
 };
 
 export type ModeMailboxValue = { mode: string; uiHints?: ModeUiHints } | null;
@@ -109,24 +107,18 @@ const THINKING_UNSET_LABEL = "(don't change)";
 const MODE_UI_HINTS: Record<string, ModeUiHints> = {
 	deep: {
 		labelColors: { default: { r: 103, g: 255, b: 168 } },
-		primaryColor: { r: 0, g: 77, b: 64 },
-		secondaryColor: { r: 29, g: 233, b: 182 },
 	},
 	smart: {
 		labelColors: {
 			default: { r: 200, g: 230, b: 68 },
 			light: { r: 0, g: 140, b: 70 },
 		},
-		primaryColor: { r: 0, g: 55, b: 20 },
-		secondaryColor: { r: 200, g: 230, b: 68 },
 	},
 	rush: {
 		labelColors: {
 			default: { r: 255, g: 215, b: 0 },
 			light: { r: 180, g: 100, b: 0 },
 		},
-		primaryColor: { r: 128, g: 51, b: 0 },
-		secondaryColor: { r: 255, g: 215, b: 0 },
 	},
 };
 
@@ -1062,8 +1054,6 @@ export default function (pi: ExtensionAPI) {
 	pi.registerShortcut("ctrl+shift+s", {
 		description: "Select prompt mode",
 		handler: async (ctx) => {
-			await ensureRuntime(pi, ctx);
-			if (!runtime.overlayEnabled) return;
 			await selectModeUI(pi, ctx);
 		},
 	});
@@ -1071,8 +1061,6 @@ export default function (pi: ExtensionAPI) {
 	pi.registerShortcut("ctrl+s", {
 		description: "Cycle prompt mode (deep → rush → smart)",
 		handler: async (ctx) => {
-			await ensureRuntime(pi, ctx);
-			if (!runtime.overlayEnabled) return;
 			await cycleMode(pi, ctx, 1);
 		},
 	});

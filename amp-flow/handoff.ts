@@ -17,11 +17,11 @@ import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
 	ExtensionContext,
-	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { extractSessionMessages } from "./subagent.ts";
 
 const SUMMARY_SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 
@@ -81,13 +81,6 @@ async function generateContextSummary(
 		.join("\n");
 }
 
-function extractMessages(ctx: ExtensionContext): any[] {
-	const branch = ctx.sessionManager.getBranch();
-	return branch
-		.filter((entry): entry is SessionEntry & { type: "message" } => entry.type === "message")
-		.map((entry) => entry.message);
-}
-
 /** Build the final prompt: goal first, parent session ref, then summary. */
 function buildFinalPrompt(goal: string, summary: string, parentSession: string | undefined): string {
 	if (parentSession) {
@@ -105,7 +98,6 @@ function buildFinalPrompt(goal: string, summary: string, parentSession: string |
  * low-level sessionManager.
  */
 async function performHandoff(
-	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	goal: string,
 	fromCommand: boolean,
@@ -114,7 +106,7 @@ async function performHandoff(
 	if (!ctx.hasUI) return "Handoff requires interactive mode.";
 	if (!ctx.model) return "No model selected.";
 
-	const messages = extractMessages(ctx);
+	const messages = extractSessionMessages(ctx);
 	if (messages.length === 0) return "No conversation to hand off.";
 
 	const parentSession = ctx.sessionManager.getSessionFile();
@@ -224,7 +216,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("Usage: /handoff <goal>", "error");
 				return;
 			}
-			const error = await performHandoff(pi, ctx, goal, true, (v) => {
+			const error = await performHandoff(ctx, goal, true, (v) => {
 				pending = v;
 			});
 			if (error) ctx.ui.notify(error, "error");
@@ -242,7 +234,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const error = await performHandoff(pi, ctx, (params.goal as string) ?? "", false, (v) => {
+			const error = await performHandoff(ctx, (params.goal as string) ?? "", false, (v) => {
 				pending = v;
 			});
 			return {

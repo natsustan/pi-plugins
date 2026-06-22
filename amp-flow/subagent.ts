@@ -25,7 +25,7 @@ import {
 	createWriteTool,
 	getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, SessionEntry, Theme } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import type { Component } from "@earendil-works/pi-tui";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
@@ -64,6 +64,14 @@ export interface SingleResult {
 
 export interface SubagentDetails {
 	results: SingleResult[];
+}
+
+export interface PreparedSubagentRunContext {
+	tools: AgentTool<any>[];
+	targetModel: Model<any>;
+	thinkingLevel: string;
+	systemPrompt: string;
+	apiKeyResolver: (provider: string) => Promise<string | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +136,37 @@ export function formatToolCall(
 			return fg("accent", toolName) + fg("dim", ` ${preview}`);
 		}
 	}
+}
+
+export function extractSessionMessages(ctx: ExtensionContext): any[] {
+	const branch = ctx.sessionManager.getBranch();
+	return branch
+		.filter((entry): entry is SessionEntry & { type: "message" } => entry.type === "message")
+		.map((entry) => entry.message);
+}
+
+export function prepareSubagentRunContext(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+): PreparedSubagentRunContext | undefined {
+	if (!ctx.model) return undefined;
+
+	const targetModel = ctx.model;
+	return {
+		tools: [
+			createReadTool(ctx.cwd),
+			createBashTool(ctx.cwd),
+			createEditTool(ctx.cwd),
+			createWriteTool(ctx.cwd),
+		],
+		targetModel,
+		thinkingLevel: pi.getThinkingLevel(),
+		systemPrompt: ctx.getSystemPrompt(),
+		apiKeyResolver: async (_provider: string) => {
+			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(targetModel);
+			return auth.ok ? auth.apiKey : undefined;
+		},
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -447,22 +486,13 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			const targetModel = ctx.model;
-			const thinkingLevel = pi.getThinkingLevel();
-
-			// Fresh built-in tools scoped to the current cwd.
-			const tools: AgentTool<any>[] = [
-				createReadTool(ctx.cwd),
-				createBashTool(ctx.cwd),
-				createEditTool(ctx.cwd),
-				createWriteTool(ctx.cwd),
-			];
-
-			const systemPrompt = ctx.getSystemPrompt();
-			const apiKeyResolver = async (_provider: string) => {
-				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(targetModel);
-				return auth.ok ? auth.apiKey : undefined;
-			};
+			const runContext = prepareSubagentRunContext(pi, ctx);
+			if (!runContext) {
+				return {
+					content: [{ type: "text", text: "No model available." }],
+					details: { results: [] } as SubagentDetails,
+				};
+			}
 
 			const allResults: SingleResult[] = tasks.map((task) => ({
 				task,
@@ -490,12 +520,12 @@ export default function (pi: ExtensionAPI) {
 
 			const results = await mapWithConcurrency(tasks, MAX_CONCURRENCY, async (task, index) => {
 				const result = await runSubagent({
-					systemPrompt,
+					systemPrompt: runContext.systemPrompt,
 					task,
-					tools,
-					model: targetModel,
-					thinkingLevel,
-					apiKeyResolver,
+					tools: runContext.tools,
+					model: runContext.targetModel,
+					thinkingLevel: runContext.thinkingLevel,
+					apiKeyResolver: runContext.apiKeyResolver,
 					signal,
 					onProgress: (r) => {
 						allResults[index] = r;

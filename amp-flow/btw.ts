@@ -13,14 +13,9 @@
  * conversation context (serialized), so it can answer questions about what
  * you've been doing.
  */
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	convertToLlm,
-	createBashTool,
-	createEditTool,
-	createReadTool,
-	createWriteTool,
 	getMarkdownTheme,
 	serializeConversation,
 	type Theme,
@@ -29,6 +24,8 @@ import { Box, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import {
 	formatToolCall,
 	formatUsage,
+	extractSessionMessages,
+	prepareSubagentRunContext,
 	runSubagent,
 	type SingleResult,
 } from "./subagent.ts";
@@ -120,8 +117,19 @@ export default function (pi: ExtensionAPI) {
 	// the custom message won't render until the turn boundary, so we show the
 	// full rendered result as a widget meanwhile and drop it at turn_end.
 	const pendingRemovals = new Map<string, () => void>();
+	const activeRuns = new Map<string, AbortController>();
 
 	pi.on("turn_end", () => {
+		for (const [, resolve] of pendingRemovals) resolve();
+		pendingRemovals.clear();
+	});
+
+	pi.on("session_shutdown", (_event, ctx) => {
+		for (const [key, controller] of activeRuns) {
+			controller.abort();
+			ctx.ui.setWidget(key, undefined);
+		}
+		activeRuns.clear();
 		for (const [, resolve] of pendingRemovals) resolve();
 		pendingRemovals.clear();
 	});
@@ -156,28 +164,15 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const targetModel = ctx.model;
-			const thinkingLevel = pi.getThinkingLevel();
-
-			const tools: AgentTool<any>[] = [
-				createReadTool(ctx.cwd),
-				createBashTool(ctx.cwd),
-				createEditTool(ctx.cwd),
-				createWriteTool(ctx.cwd),
-			];
-
-			const systemPrompt = ctx.getSystemPrompt();
-			const apiKeyResolver = async (_provider: string) => {
-				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(targetModel);
-				return auth.ok ? auth.apiKey : undefined;
-			};
+			const runContext = prepareSubagentRunContext(pi, ctx);
+			if (!runContext) {
+				ctx.ui.notify("No model selected.", "error");
+				return;
+			}
 
 			// Seed the subagent with the current conversation so it can answer
 			// questions about what you've been working on.
-			const branch = ctx.sessionManager.getBranch();
-			const messages = branch
-				.filter((entry): entry is SessionEntry & { type: "message" } => entry.type === "message")
-				.map((entry) => entry.message);
+			const messages = extractSessionMessages(ctx);
 			const conversationContext = messages.length > 0
 				? serializeConversation(convertToLlm(messages))
 				: "";
@@ -186,20 +181,27 @@ export default function (pi: ExtensionAPI) {
 				: task;
 
 			const widgetKey = `btw-${++btwCounter}`;
+			const controller = new AbortController();
+			activeRuns.set(widgetKey, controller);
 			ctx.ui.setWidget(widgetKey, [`⏳ btw: ${taskPreview(task)}`], { placement: "aboveEditor" });
 
 			// Fire and forget — runs in background, updates widget on progress.
 			runSubagent({
-				systemPrompt,
+				systemPrompt: runContext.systemPrompt,
 				task: taskWithContext,
-				tools,
-				model: targetModel,
-				thinkingLevel,
-				apiKeyResolver,
+				tools: runContext.tools,
+				model: runContext.targetModel,
+				thinkingLevel: runContext.thinkingLevel,
+				apiKeyResolver: runContext.apiKeyResolver,
+				signal: controller.signal,
 				onProgress: (r) => {
+					if (!activeRuns.has(widgetKey)) return;
 					ctx.ui.setWidget(widgetKey, progressLines(task, r), { placement: "aboveEditor" });
 				},
 			}).then(async (result) => {
+				if (!activeRuns.has(widgetKey)) return;
+				activeRuns.delete(widgetKey);
+
 				// Report under the short user prompt, not the context-enriched one.
 				result.task = task;
 
@@ -226,6 +228,7 @@ export default function (pi: ExtensionAPI) {
 				}
 				ctx.ui.setWidget(widgetKey, undefined);
 			}).catch((err) => {
+				activeRuns.delete(widgetKey);
 				ctx.ui.setWidget(widgetKey, undefined);
 				ctx.ui.notify(`btw failed: ${err instanceof Error ? err.message : String(err)}`, "error");
 			});
