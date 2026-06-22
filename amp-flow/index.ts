@@ -29,7 +29,10 @@ function createToolEventBridge(pi: ExtensionAPI): SubagentToolEventBridge {
 	};
 
 	return {
-		canForwardToolCalls: () => toolCallHandlers.length > 0,
+		// Only handlers registered after amp-flow loads are visible here. Earlier
+		// policy/sandbox hooks may still be active for the parent session, so do
+		// not expose mutating subagent tools based on this partial handler list.
+		canForwardToolCalls: () => false,
 		hasToolResultHandlers: () => toolResultHandlers.length > 0,
 		async emitToolCall(event, ctx) {
 			let result;
