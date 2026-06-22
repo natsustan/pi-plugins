@@ -2,35 +2,37 @@
 
 A [pi](https://github.com/earendil-works/pi-mono) extension that restyles pi's
 prompt panel into a **bottom-docked ASCII frame inspired by Amp Code**:
-rounded box, model name docked to the top-right, `cwd (git-branch) · ctx %`
-docked to the bottom-right, and a braille spinner on the top-left while the
-agent runs.
+rounded box, the **context %** + **mode/model name** docked to the
+top-right, `cwd (git-branch)` docked to the bottom-right, and a braille
+spinner on the top-left while the agent runs.
 
 ```
-╭ ⠋────────────────────────── smart ───────────────────╮
-│ █                                                    │
-│                                                      │
-╰────────── ~/projects/pi-plugins (main) · 12% ────╯
+╭ ⠋──────────── 12% ── smart ─────────────────────╮
+│ █                                              │
+│                                                │
+╰────────── ~/projects/pi-plugins (main) ────╯
 ```
 
-When the **amp-modes** extension is loaded alongside this one and a named
-mode is active, its name is shown as a colored badge (` smart ` above) docked
-top-right, replacing the model name + thinking level — a mode is itself a
-model+thinking preset, so showing both would be redundant. The badge uses the
-fixed RGB `uiHints` published by amp-modes, or the thinking-level color when a
-mode has no hint. When the current selection doesn't match any mode ("custom"),
-the badge is hidden and the model name + thinking level are shown instead, so the top-right
+The **context %** (` 12% `) sits in the top-right, docked to the **left**
+of the mode/model label, so the two read as one unit (` 12% ─ smart `). When
+the **amp-modes** extension is loaded alongside this one and a named mode is
+active, its name is shown as a colored badge (` smart ` above) replacing the
+model name + thinking level — a mode is itself a model+thinking preset, so
+showing both would be redundant. The badge uses the fixed RGB `uiHints`
+published by amp-modes, or the thinking-level color when a mode has no hint.
+When the current selection doesn't match any mode ("custom"), the badge is
+hidden and the model name + thinking level are shown instead, so the top-right
 is never blank. The two packages communicate via a process-global mailbox +
 event — no import needed, just load both.
 
 The box frame is plain (default fg). The **thinking-level color** (pi's
 `EditorTheme.borderColor`, set per active thinking level) highlights the model
-name + thinking-level suffix. The bottom-right cluster — **cwd, git branch,
-and context %** — is uniformly **muted** (pi's dim text color), matching the
-cwd display so the whole cluster reads as one consistent unit. The model name
-gains a ` (<level>)` suffix showing the current thinking level — e.g.
-suffix showing the current thinking level — e.g. `claude-sonnet-4-5 (high)`
-— taken from `pi.getThinkingLevel()`
+name + thinking-level suffix. The **context %** is **muted** (pi's dim text
+color) so it reads as plain info next to the colored mode/model label. The
+bottom-right cluster — **cwd + git branch** — is uniformly **muted** too, so
+it reads as one consistent unit. The model name gains a ` (<level>)` suffix
+showing the current thinking level — e.g. `claude-sonnet-4-5 (high)` — taken
+from `pi.getThinkingLevel()`
 (`minimal`/`low`/`medium`/`high`/`xhigh`). The suffix is omitted when thinking
 is `off`, since pi clamps non-reasoning models to `off` anyway.
 
@@ -68,9 +70,9 @@ pi -e /Users/spike/projects/pi-plugins/amp-editor
 
 | Surface            | Before                          | After                                                |
 | ------------------ | ------------------------------- | ---------------------------------------------------- |
-| Editor top border  | plain `──────`                  | `╭ [spinner]───── model (<level>) ╮`                  |
+| Editor top border  | plain `──────`                  | `╭ [spinner]───── % ─ model/mode ╮`                   |
 | Editor sides       | none                            | `│ … │` (text inset 1 col from the border)            |
-| Editor bottom      | plain `──────`                  | `╰ [↓ N]───── ~/cwd (branch) · % ╯` (muted cluster)  |
+| Editor bottom      | plain `──────`                  | `╰ [↓ N]───── ~/cwd (branch) ╯` (muted)              |
 | Working indicator  | separate row above editor       | spinner inline in the top-left of the panel          |
 | Footer             | model / tokens / cost / cwd row | hidden (the panel now carries model + cwd + context) |
 

@@ -12,18 +12,18 @@
  * Layout ([brackets] mark the thinking-level color for the model name; the
  * box frame is plain):
  *
- *   ╭ ⠋─────────────────────────── [claude-sonnet-4-5 (high)] ─╮
- *   │ █                                                        │
- *   │                                                          │
- *   ╰────────── ~/projects/pi-plugins (main) · 12% ────────╯
+ *   ╭ ⠋──────────── 12% ── [claude-sonnet-4-5 (high)] ─╮
+ *   │ █                                                │
+ *   │                                                  │
+ *   ╰────────── ~/projects/pi-plugins (main) ────────╯
  *
  * Color scheme:
  *   - Box frame (corners, sides, dashes): plain default fg.
  *   - Model name + (level): thinking-level color (pi's EditorTheme.borderColor,
  *     set per active thinking level by pi).
- *   - cwd, git branch, ctx %: muted (pi's dim text color), so the whole
- *     bottom-right cluster — the "file folder name" plus branch + context —
- *     shares one consistent color.
+ *   - cwd, git branch, ctx %: muted (pi's dim text color). ctx % sits in the
+ *     top-right next to the model/mode label; cwd + branch sit in the
+ *     bottom-right. Muted in both spots so each reads as "info".
  *
  * The base editor is rendered at `width - 2` and its content lines are then
  * wrapped in `│ … │`. The top/bottom border lines from the base are replaced
@@ -143,10 +143,12 @@ function formatCwd(cwd: string): string {
 }
 
 /**
- * ` · 12%` when usage is known and non-zero, else empty (nothing to show at
- * 0%). Cached and recomputed only when marked stale — getContextUsage() can
- * estimate tokens over trailing messages, so recomputing on every render and
- * every 80ms spinner tick during streaming is wasteful.
+ * `12%` (no prefix) when usage is known and non-zero, else empty (nothing to
+ * show at 0%). Rendered in the top border next to the mode/model label, so the
+ * caller wraps it with its own spacing. Cached and recomputed only when marked
+ * stale — getContextUsage() can estimate tokens over trailing messages, so
+ * recomputing on every render and every 80ms spinner tick during streaming is
+ * wasteful.
  */
 let cachedCtxText = "";
 let ctxCacheStale = true;
@@ -158,7 +160,7 @@ function formatContext(ctx: ExtensionContext): string {
 			cachedCtxText = "";
 		} else {
 			const pct = Math.round(usage.percent);
-			cachedCtxText = pct > 0 ? ` · ${pct}%` : "";
+			cachedCtxText = pct > 0 ? `${pct}%` : "";
 		}
 		ctxCacheStale = false;
 	}
@@ -293,10 +295,10 @@ export default function (pi: ExtensionAPI) {
 				const th = ctx.ui.theme;
 				// Color scheme: the thinking-level color (this.borderColor, set by pi
 				// from the active thinking level) highlights the model name + thinking
-				// level. cwd, git branch, and context % are all muted (pi's dim text
-				// color) so the whole bottom-right cluster — the "file folder name"
-				// plus branch + context — shares one consistent color. The box frame
-				// uses plain (default) text color.
+				// level (and the mode badge, which replaces them when a named mode is
+				// active). Context %, cwd, and git branch are all muted (pi's dim text
+				// color) so they read as "info" regardless of which border they sit on.
+				// The box frame uses plain (default) text color.
 				const thinkingFg = (s: string) => this.borderColor(s);
 				const mutedFg = (s: string) => th.fg("muted", s);
 				const frame = (s: string) => s;
@@ -342,9 +344,19 @@ export default function (pi: ExtensionAPI) {
 				// match any mode ("custom"), fall back to the model name + level so
 				// the top-right isn't blank.
 				const modeBadge = renderModeBadge(readModeLabel(), thinkingFg);
-				const rightLabel = modeBadge
+				const rightPrimary = modeBadge
 					? modeBadge
 					: (modelText ? thinkingFg(` ${modelText} `) : "");
+				// Context % lives in the top-right, docked to the LEFT of the mode/model
+				// label (e.g. `── 12% ─ smart ─╮`), so the bottom-right is just cwd +
+				// branch. Muted to read as "info" next to the colored mode. When there's
+				// no usage yet it's empty and the right side collapses to the label alone.
+				const ctxPct = formatContext(ctx);
+				const ctxSegment = ctxPct ? mutedFg(` ${ctxPct} `) : "";
+				const rightLabel =
+					ctxSegment && rightPrimary
+						? ctxSegment + frame(CORNERS.dash) + rightPrimary
+						: rightPrimary || ctxSegment;
 				const model = rightLabel ? rightLabel + frame(CORNERS.dash) : "";
 				out.push(renderBorder(CORNERS.topLeft, CORNERS.topRight, topLeft, model, width, frame));
 
@@ -355,15 +367,13 @@ export default function (pi: ExtensionAPI) {
 					out.push(side + base[i]! + side);
 				}
 
-				// --- bottom border: scroll-down on the left, cwd(branch)·ctx on the right.
-				// cwd, git branch, and context % are all muted so they form one visually
-				// unified cluster.
+				// --- bottom border: scroll-down on the left, cwd(branch) on the right.
+				// cwd and git branch are muted so they form one visually unified cluster.
+				// (Context % moved up to the top border, next to the mode/model label.)
 				const bottomLeft = bottomScroll != null ? th.fg("muted", ` ↓ ${bottomScroll} `) : "";
 				const cwdPart = mutedFg(formatCwd(ctx.cwd));
 				const branchPart = branch ? mutedFg(` (${branch})`) : "";
-				const ctxPart = formatContext(ctx);
-				const ctxColored = ctxPart ? mutedFg(ctxPart) : "";
-				const bottomRight = ` ${cwdPart}${branchPart}${ctxColored} ` + frame(CORNERS.dash);
+				const bottomRight = ` ${cwdPart}${branchPart} ` + frame(CORNERS.dash);
 				out.push(
 					renderBorder(CORNERS.bottomLeft, CORNERS.bottomRight, bottomLeft, bottomRight, width, frame),
 				);
