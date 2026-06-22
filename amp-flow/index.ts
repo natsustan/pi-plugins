@@ -29,7 +29,7 @@ function createToolEventBridge(pi: ExtensionAPI): SubagentToolEventBridge {
 	};
 
 	return {
-		hasToolCallHandlers: () => toolCallHandlers.length > 0,
+		canForwardToolCalls: () => toolCallHandlers.length > 0,
 		hasToolResultHandlers: () => toolResultHandlers.length > 0,
 		async emitToolCall(event, ctx) {
 			let result;

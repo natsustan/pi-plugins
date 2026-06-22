@@ -90,7 +90,7 @@ type ModelAuth = {
 };
 
 export interface SubagentToolEventBridge {
-	hasToolCallHandlers(): boolean;
+	canForwardToolCalls(): boolean;
 	hasToolResultHandlers(): boolean;
 	emitToolCall(event: {
 		type: "tool_call";
@@ -184,7 +184,11 @@ function toRecord(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
-function buildActiveSubagentTools(pi: ExtensionAPI, ctx: ExtensionContext): AgentTool<any>[] {
+function buildActiveSubagentTools(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	toolEvents?: SubagentToolEventBridge,
+): AgentTool<any>[] {
 	const configuredTools = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
 	return pi.getActiveTools().flatMap((name): AgentTool<any>[] => {
 		const configuredTool = configuredTools.get(name);
@@ -194,10 +198,14 @@ function buildActiveSubagentTools(pi: ExtensionAPI, ctx: ExtensionContext): Agen
 			case "read":
 				return [createReadTool(ctx.cwd)];
 			case "bash":
-				return [createBashTool(ctx.cwd)];
 			case "edit":
-				return [createEditTool(ctx.cwd)];
 			case "write":
+				// These tools can execute commands or mutate files. If amp-flow did
+				// not see the active tool-call handlers, recreating them locally would
+				// bypass policy/sandbox extensions that loaded earlier.
+				if (!toolEvents?.canForwardToolCalls()) return [];
+				if (name === "bash") return [createBashTool(ctx.cwd)];
+				if (name === "edit") return [createEditTool(ctx.cwd)];
 				return [createWriteTool(ctx.cwd)];
 			case "grep":
 				return [createGrepTool(ctx.cwd)];
@@ -294,7 +302,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		reasoning: opts.thinkingLevel !== "off" ? (opts.thinkingLevel as any) : undefined,
 	};
 	if (opts.toolEvents && opts.toolEventContext) {
-		if (opts.toolEvents.hasToolCallHandlers()) {
+		if (opts.toolEvents.canForwardToolCalls()) {
 			config.beforeToolCall = async ({ toolCall, args }: BeforeToolCallContext, signal?: AbortSignal) => {
 				if (signal?.aborted) return { block: true, reason: "Tool call aborted." };
 				return opts.toolEvents!.emitToolCall({

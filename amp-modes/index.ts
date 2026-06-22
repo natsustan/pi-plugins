@@ -495,6 +495,14 @@ async function mutateModesFile(
  */
 let lastPublishedModeKey: string | undefined;
 
+function emitModeChange(pi: ExtensionAPI, value: ModeMailboxValue): void {
+	try {
+		pi.events.emit(MODE_CHANGE_CHANNEL, value);
+	} catch {
+		// events may be unavailable in non-interactive modes — ignore.
+	}
+}
+
 function displayModeName(pi: ExtensionAPI, mode: string): string {
 	if (mode !== DEEP_MODE_NAME) return mode;
 	const level = pi.getThinkingLevel();
@@ -528,11 +536,13 @@ function publishMode(pi: ExtensionAPI): void {
 	// Fire-and-forget; amp-editor listens to force a re-render even when the
 	// mode label changes without a model/thinking event (rare, but covers
 	// before_agent_start inference).
-	try {
-		pi.events.emit(MODE_CHANGE_CHANNEL, value);
-	} catch {
-		// events may be unavailable in non-interactive modes — ignore.
-	}
+	emitModeChange(pi, value);
+}
+
+function clearPublishedMode(pi: ExtensionAPI): void {
+	(globalThis as any)[MODE_MAILBOX] = null;
+	lastPublishedModeKey = undefined;
+	emitModeChange(pi, null);
 }
 
 // =============================================================================
@@ -1181,6 +1191,10 @@ export default function (pi: ExtensionAPI) {
 		lastObservedModel = { provider: ctx.model?.provider, modelId: ctx.model?.id };
 		await ensureRuntime(pi, ctx);
 		await syncModeFromCurrentSelection(pi, ctx);
+	});
+
+	pi.on("session_shutdown", async () => {
+		clearPublishedMode(pi);
 	});
 
 	pi.on("model_select", async (event: any, ctx) => {
