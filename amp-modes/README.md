@@ -14,6 +14,7 @@ and the mode manager can be installed and versioned independently.
 /mode configure    # add / rename / delete / edit modes
 Ctrl+Shift+S       # open picker
 Ctrl+S             # cycle deep -> rush -> smart
+Option+D           # in deep mode: deep -> deep² -> deep³
 ```
 
 Bootstrap modes (written to `~/.pi/agent/modes.json` on first use; edit there
@@ -33,6 +34,10 @@ as well as thinking level.
 The active mode is reverse-matched from your current model + thinking whenever
 they change (Ctrl+P, `/model`, other extensions), so the label stays accurate.
 When nothing matches, no mode is active ("custom").
+
+While the default `deep` mode is active, `Option+D` cycles only its thinking
+level: `medium` (`deep`) → `high` (`deep²`) → `xhigh` (`deep³`). `smart` and
+`rush` keep their fixed presets.
 
 ## Thinking lock while a mode is active
 

@@ -17,6 +17,7 @@
  *   /mode configure    configuration UI
  *   Ctrl+Shift+S       open picker
  *   Ctrl+S             cycle deep → rush → smart
+ *   Option+D           in deep mode: cycle deep → deep² → deep³
  *
  * Config: .pi/modes.json (project) → ~/.pi/agent/modes.json (global).
  * Setting `"modes": {}` disables the overlay (labels, shortcuts) while
@@ -86,6 +87,8 @@ type LoadedModes = {
 };
 
 const CUSTOM_MODE_NAME = "custom" as const;
+const DEEP_MODE_NAME = "deep" as const;
+const DEEP_THINKING_LEVELS: ThinkingLevel[] = ["medium", "high", "xhigh"];
 
 // Bootstrap defaults written when no modes.json exists. They intentionally
 // avoid provider/model pins so the extension works with whatever model the
@@ -489,10 +492,26 @@ async function mutateModesFile(
  */
 let lastPublishedModeKey: string | undefined;
 
+function displayModeName(pi: ExtensionAPI, mode: string): string {
+	if (mode !== DEEP_MODE_NAME) return mode;
+	const level = pi.getThinkingLevel();
+	if (level === "high") return "deep²";
+	if (level === "xhigh") return "deep³";
+	return mode;
+}
+
+function isDeepThinkingVariant(level: ThinkingLevel | undefined): boolean {
+	return level === "medium" || level === "high" || level === "xhigh";
+}
+
+function isDefaultDeepSpec(name: string, spec: ModeSpec | undefined): boolean {
+	return name === DEEP_MODE_NAME && spec?.thinkingLevel === "medium";
+}
+
 function publishMode(pi: ExtensionAPI): void {
 	let value: ModeMailboxValue = null;
 	if (runtime.overlayEnabled && runtime.currentMode !== "" && runtime.currentMode !== CUSTOM_MODE_NAME) {
-		value = { mode: runtime.currentMode, uiHints: MODE_UI_HINTS[runtime.currentMode] };
+		value = { mode: displayModeName(pi, runtime.currentMode), uiHints: MODE_UI_HINTS[runtime.currentMode] };
 	}
 	(globalThis as any)[MODE_MAILBOX] = value;
 
@@ -565,6 +584,12 @@ function inferModeFromSelection(selection: SelectionSnapshot, data: ModesFile): 
 			const spec = data.modes[name];
 			if (!spec) continue;
 			if (spec.thinkingLevel === thinkingLevel) return name;
+		}
+		if (isDeepThinkingVariant(thinkingLevel)) {
+			for (const name of candidates) {
+				const spec = data.modes[name];
+				if (isDefaultDeepSpec(name, spec)) return name;
+			}
 		}
 		for (const name of candidates) {
 			const spec = data.modes[name];
@@ -732,6 +757,33 @@ async function cycleMode(pi: ExtensionAPI, ctx: ExtensionContext, direction: 1 |
 	const run = modeCycleQueue.then(() => cycleModeNow(pi, ctx, direction), () => cycleModeNow(pi, ctx, direction));
 	modeCycleQueue = run.then(() => undefined, () => undefined);
 	await run;
+}
+
+async function cycleDeepThinkingLevel(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+	await ensureRuntime(pi, ctx);
+	if (!runtime.overlayEnabled || runtime.currentMode !== DEEP_MODE_NAME) return;
+
+	const spec = runtime.data.modes[DEEP_MODE_NAME];
+	if (!isDefaultDeepSpec(DEEP_MODE_NAME, spec)) return;
+
+	const current = pi.getThinkingLevel() as ThinkingLevel;
+	const idx = DEEP_THINKING_LEVELS.indexOf(current);
+	const next = DEEP_THINKING_LEVELS[(idx + 1) % DEEP_THINKING_LEVELS.length] ?? "medium";
+
+	runtime.applying = true;
+	try {
+		pi.setThinkingLevel(next);
+	} finally {
+		runtime.applying = false;
+	}
+
+	if (isDeepThinkingVariant(pi.getThinkingLevel() as ThinkingLevel)) {
+		runtime.currentMode = DEEP_MODE_NAME;
+		runtime.lastRealMode = DEEP_MODE_NAME;
+		publishMode(pi);
+	} else {
+		await syncModeFromCurrentSelection(pi, ctx);
+	}
 }
 
 // =============================================================================
@@ -1108,6 +1160,13 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerShortcut("alt+d", {
+		description: "Cycle deep thinking level (deep → deep² → deep³)",
+		handler: async (ctx) => {
+			await cycleDeepThinkingLevel(pi, ctx);
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		lastObservedModel = { provider: ctx.model?.provider, modelId: ctx.model?.id };
 		await ensureRuntime(pi, ctx);
@@ -1156,7 +1215,12 @@ export default function (pi: ExtensionAPI) {
 			!!spec.modelId &&
 			(spec.provider !== selection.provider || spec.modelId !== selection.modelId);
 
-		const currentLevel = pi.getThinkingLevel();
+		const currentLevel = pi.getThinkingLevel() as ThinkingLevel;
+		if (!modelChanged && isDefaultDeepSpec(mode, spec) && isDeepThinkingVariant(currentLevel)) {
+			publishMode(pi);
+			return;
+		}
+
 		if (runtime.lockThinkingWhenModeActive && !modelChanged && currentLevel !== spec.thinkingLevel) {
 			revertingThinking = true;
 			try {
