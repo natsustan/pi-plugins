@@ -9,6 +9,7 @@
  * This module does NOT draw any editor chrome. It publishes the current mode
  * to a process-global mailbox (read by the amp-editor extension, which renders
  * the mode label in its top border) and fires an event to force a re-render.
+ * See "CROSS-PACKAGE CONTRACT" below for the shared literals.
  *
  *   /mode              mode picker
  *   /mode <name>       switch directly
@@ -28,13 +29,17 @@ import os from "node:os";
 import fs from "node:fs/promises";
 
 // =============================================================================
-// Shared contract with amp-editor (process-global, no import needed)
+// CROSS-PACKAGE CONTRACT with amp-editor (process-global, no import needed)
 // =============================================================================
+// amp-editor reads the mailbox + listens on the channel below to render the
+// mode badge. Symbol.for is global by construction, but MODE_CHANGE_CHANNEL is
+// a plain string and WILL SILENTLY BREAK badge repaints if the two sides drift.
+// If you rename it here, rename it in amp-editor/index.ts too (and vice versa).
 
-/** Registered Symbol so modes.ts and amp-editor share one mailbox key. */
+/** Global mailbox key shared with amp-editor. Symbol.for → globally unique. */
 const MODE_MAILBOX = Symbol.for("amp.modes.current");
-/** Event channel: fired whenever the active mode (or color) may have changed. */
-const MODE_CHANGE_CHANNEL = "amp.modes-change";
+/** Event channel — MUST match amp-editor/index.ts exactly. */
+const MODE_CHANGE_CHANNEL = "amp:modes-change";
 
 export type ModeMailboxValue = { mode: string; color?: string } | null;
 

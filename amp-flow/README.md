@@ -1,17 +1,15 @@
 # amp-flow
 
 [pi](https://github.com/earendil-works/pi-mono) extensions that bring Amp
-Code–style workflows to pi: **handoff**, **subagent**, **/btw**, and
-**modes**.
+Code–style workflows to pi: **handoff**, **subagent**, and **/btw**.
 
-Four cooperating extensions in one package:
+Three cooperating extensions in one package:
 
 | Extension | Entry point | What it does |
 |-----------|-------------|--------------|
 | handoff | `/handoff <goal>` + `handoff` tool | Generate a focused summary of the current conversation and start a new session seeded with it (non-lossy alternative to compaction). |
 | subagent | `subagent` tool | Spawn one or more isolated in-process subagents with the built-in tools (read/bash/edit/write). Parallel, context-saving. |
 | btw | `/btw <prompt>` | Run a background subagent with a live progress widget; result lands as a rendered chat message. Sees the current conversation. |
-| modes | `/mode` + `Ctrl+S`/`Ctrl+Shift+S` | Named model+thinking presets (rush/smart/deep). Active mode shows as a colored badge in the amp-editor top border. |
 
 ## Install
 
@@ -34,7 +32,7 @@ npm install
 
 ### 3. Reload
 
-Run `/reload` in pi (or restart). The two commands and the two tools appear.
+Run `/reload` in pi (or restart). The command and the two tools appear.
 
 ## Usage
 
@@ -75,44 +73,6 @@ widget above the editor shows tool calls as they happen. When it finishes, the
 result renders as a chat message (filtered out of LLM context). Ask several in
 parallel; each gets its own widget.
 
-### Modes
-
-Named presets of model + thinking level (+ optional border color). Switch all
-three in one step:
-
-```
-/mode              # picker
-/mode rush         # switch directly
-/mode store fast   # save current selection into a mode
-/mode configure    # add / rename / delete / edit modes
-Ctrl+Shift+S       # open picker
-Ctrl+S             # cycle deep → rush → smart → …
-```
-
-Bootstrap modes (written to `~/.pi/agent/modes.json` on first use; edit there
-or in `.pi/modes.json` per project):
-
-```json
-{
-  "rush":  { "provider": "openai-codex", "modelId": "gpt-5.5", "thinkingLevel": "off" },
-  "smart": { "provider": "zai", "modelId": "glm-5.2", "thinkingLevel": "high" },
-  "deep":  { "provider": "openai-codex", "modelId": "gpt-5.5", "thinkingLevel": "medium" }
-}
-```
-
-The active mode is reverse-matched from your current model + thinking whenever
-they change (Ctrl+P, `/model`, other extensions), so the label stays accurate.
-When nothing matches, the border shows no badge ("custom").
-
-**Integration with amp-editor:** this package publishes the active mode to a
-process-global mailbox; the `amp-editor` package reads it and renders a colored
-badge in the top-right of the top border. When a mode is active, the badge
-*replaces* the model name + thinking level (a mode is already a
-model+thinking preset); when no mode matches ("custom"), amp-editor falls back
-to showing the model name + level. Load both for the visual label. Setting
-`"modes": {}` disables the overlay (labels + shortcuts) while keeping
-`/mode configure`.
-
 ## Notes
 
 - TUI-only. In RPC / JSON / print mode the commands are inert.
@@ -121,14 +81,13 @@ to showing the model name + level. Load both for the visual label. Setting
   copy of the conversation).
 - `handoff` tool-path uses a low-level `sessionManager.newSession()` plus a
   `context`-event message filter, since tool context lacks `newSession()`.
-- `modes` does not draw editor chrome itself — it publishes the active mode for
-  `amp-editor` to render. Load both packages together for the border badge.
 
 ## Scope
 
 | Surface | Status |
 |---------|--------|
-| `-mode` / `-model` flags | Not supported (would need a modes package + session-replacement model switching). Use `/model` after handoff. |
+| Model+thinking presets | Not in this package — see the separate **amp-modes** package for named presets (rush/smart/deep) and the border badge. |
+| `-mode` / `-model` flags | Not supported. Use `/model` after handoff. |
 | Custom subagent tool sets | Not supported — always read/bash/edit/write. |
 | Session-query (querying parent sessions) | Not included. |
 

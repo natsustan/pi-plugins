@@ -68,13 +68,15 @@ const CORNERS = {
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 80;
 
-// ---- mode label (sourced from the amp-flow modes extension) -----------------
+// ---- mode label (sourced from the amp-modes extension) ---------------------
 //
-// The modes extension publishes the active mode to a process-global mailbox
-// (Symbol.for) and fires an event whenever it changes. We read the mailbox on
-// each render to label the top border, and subscribe to the event so a label
-// change without a model/thinking event still forces a repaint. Both sides
-// share the Symbol + channel name as a string contract — no import needed.
+// CROSS-PACKAGE CONTRACT: amp-modes publishes the active mode to a
+// process-global mailbox (Symbol.for) and fires an event whenever it changes.
+// We read the mailbox on each render to label the top border, and subscribe to
+// the event so a label change without a model/thinking event still forces a
+// repaint. Symbol.for is global by construction, but MODE_CHANGE_CHANNEL is a
+// plain string and WILL SILENTLY BREAK badge repaints if the two sides drift.
+// If you rename it here, rename it in amp-modes/index.ts too (and vice versa).
 const MODE_MAILBOX = Symbol.for("amp.modes.current");
 const MODE_CHANGE_CHANNEL = "amp:modes-change";
 const SIMPLE_MODE_COLOR_ANSI: Record<string, string> = {
@@ -339,7 +341,7 @@ export default function (pi: ExtensionAPI) {
 				const thinkingSuffix = level !== "off" ? ` (${level})` : "";
 				const modelText = ctx.model ? `${ctx.model.id}${thinkingSuffix}` : "";
 				// A named mode is itself a model+thinking preset, so when one is
-				// active (published by the amp-flow modes extension) we show ONLY the
+				// active (published by the amp-modes extension) we show ONLY the
 				// mode badge — showing both is redundant. When the selection doesn't
 				// match any mode ("custom"), fall back to the model name + level so
 				// the top-right isn't blank.

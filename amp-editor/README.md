@@ -13,7 +13,7 @@ agent runs.
 ╰────────── ~/projects/pi-plugins (main) · 12% ────╯
 ```
 
-When the **amp-flow** modes extension is loaded alongside this one and a named
+When the **amp-modes** extension is loaded alongside this one and a named
 mode is active, its name is shown as a colored badge (` smart ` above) docked
 top-right, replacing the model name + thinking level — a mode is itself a
 model+thinking preset, so showing both would be redundant. The badge uses the
