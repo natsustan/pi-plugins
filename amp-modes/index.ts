@@ -991,6 +991,7 @@ async function editModeUI(pi: ExtensionAPI, ctx: ExtensionContext, mode: string)
 			const ok = await ctx.ui.confirm("Delete mode", `Delete mode "${modeName}"?`);
 			if (!ok) continue;
 
+			const wasCurrentMode = runtime.currentMode === modeName;
 			await mutateModesFile(pi, ctx, (data) => {
 				delete data.modes[modeName];
 				ensureCurrentModeValid(data);
@@ -998,7 +999,7 @@ async function editModeUI(pi: ExtensionAPI, ctx: ExtensionContext, mode: string)
 
 			if (!runtime.overlayEnabled) {
 				runtime.currentMode = CUSTOM_MODE_NAME;
-			} else if (runtime.currentMode === modeName) {
+			} else if (wasCurrentMode) {
 				await syncModeFromCurrentSelection(pi, ctx);
 			}
 			if (runtime.lastRealMode === modeName) {
