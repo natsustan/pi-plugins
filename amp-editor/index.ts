@@ -79,28 +79,24 @@ const SPINNER_INTERVAL_MS = 80;
 // If you rename it here, rename it in amp-modes/index.ts too (and vice versa).
 const MODE_MAILBOX = Symbol.for("amp.modes.current");
 const MODE_CHANGE_CHANNEL = "amp:modes-change";
-const SIMPLE_MODE_COLOR_ANSI: Record<string, string> = {
-	red: "\u001b[31m",
-	yellow: "\u001b[33m",
-	green: "\u001b[32m",
-	cyan: "\u001b[36m",
-	blue: "\u001b[34m",
-	purple: "\u001b[35m",
-	gray: "\u001b[90m",
-	white: "\u001b[37m",
+type RGB = { r: number; g: number; b: number };
+type ModeUiHints = {
+	labelColors: { default?: RGB; light?: RGB };
+	primaryColor: RGB;
+	secondaryColor: RGB;
 };
-type ModeMailboxValue = { mode: string; color?: string } | null;
+type ModeMailboxValue = { mode: string; uiHints?: ModeUiHints } | null;
 
 function readModeLabel(): ModeMailboxValue {
 	return (globalThis as any)[MODE_MAILBOX] ?? null;
 }
 
-/** Color a mode badge: simple color name → raw ANSI; otherwise thinking color. */
+/** Color a mode badge from fixed RGB uiHints; fall back to thinking color. */
 function renderModeBadge(label: ModeMailboxValue, thinkingFg: (s: string) => string): string {
 	if (!label) return "";
-	const ansi = label.color ? SIMPLE_MODE_COLOR_ANSI[label.color] : undefined;
 	const body = ` ${label.mode} `;
-	return ansi ? `${ansi}${body}\u001b[39m` : thinkingFg(body);
+	const rgb = label.uiHints?.labelColors.default ?? label.uiHints?.labelColors.light;
+	return rgb ? `\u001b[38;2;${rgb.r};${rgb.g};${rgb.b}m${body}\u001b[39m` : thinkingFg(body);
 }
 
 // ---- helpers --------------------------------------------------------------

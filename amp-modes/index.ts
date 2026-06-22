@@ -1,7 +1,7 @@
 /**
- * modes — prompt mode manager (model + thinking + color presets).
+ * modes — prompt mode manager (model + thinking presets).
  *
- * A "mode" is a named preset of {provider, modelId, thinkingLevel, color}.
+ * A "mode" is a named preset of {provider, modelId, thinkingLevel}.
  * Switching modes applies the model + thinking level in one step. The current
  * selection is also reverse-matched to a mode name, so model changes made via
  * Ctrl+P / /model / other extensions sync the active mode label.
@@ -41,7 +41,14 @@ const MODE_MAILBOX = Symbol.for("amp.modes.current");
 /** Event channel — MUST match amp-editor/index.ts exactly. */
 const MODE_CHANGE_CHANNEL = "amp:modes-change";
 
-export type ModeMailboxValue = { mode: string; color?: string } | null;
+type RGB = { r: number; g: number; b: number };
+type ModeUiHints = {
+	labelColors: { default?: RGB; light?: RGB };
+	primaryColor: RGB;
+	secondaryColor: RGB;
+};
+
+export type ModeMailboxValue = { mode: string; uiHints?: ModeUiHints } | null;
 
 /** Read the current mode mailbox (used by amp-editor). Exported for tests. */
 export function readModeMailbox(): ModeMailboxValue {
@@ -59,8 +66,6 @@ type ModeSpec = {
 	provider?: string;
 	modelId?: string;
 	thinkingLevel?: ThinkingLevel;
-	/** Optional border color override: simple names (red/blue/...) or legacy theme token. */
-	color?: string;
 };
 
 type ModesFile = {
@@ -95,9 +100,29 @@ const MODE_UI_BACK = "Back";
 const ALL_THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const THINKING_UNSET_LABEL = "(don't change)";
 
-const COLOR_UNSET_LABEL = "match thinking color";
-const SIMPLE_MODE_COLORS = ["red", "yellow", "green", "cyan", "blue", "purple", "gray", "white"] as const;
-type SimpleModeColor = (typeof SIMPLE_MODE_COLORS)[number];
+const MODE_UI_HINTS: Record<string, ModeUiHints> = {
+	deep: {
+		labelColors: { default: { r: 103, g: 255, b: 168 } },
+		primaryColor: { r: 0, g: 77, b: 64 },
+		secondaryColor: { r: 29, g: 233, b: 182 },
+	},
+	smart: {
+		labelColors: {
+			default: { r: 200, g: 230, b: 68 },
+			light: { r: 0, g: 140, b: 70 },
+		},
+		primaryColor: { r: 0, g: 55, b: 20 },
+		secondaryColor: { r: 200, g: 230, b: 68 },
+	},
+	rush: {
+		labelColors: {
+			default: { r: 255, g: 215, b: 0 },
+			light: { r: 180, g: 100, b: 0 },
+		},
+		primaryColor: { r: 128, g: 51, b: 0 },
+		secondaryColor: { r: 255, g: 215, b: 0 },
+	},
+};
 
 // =============================================================================
 // File/path helpers
@@ -235,7 +260,6 @@ function sanitizeModeSpec(spec: unknown): ModeSpec {
 		provider: typeof obj.provider === "string" ? obj.provider : undefined,
 		modelId: typeof obj.modelId === "string" ? obj.modelId : undefined,
 		thinkingLevel: normalizeThinkingLevel(obj.thinkingLevel),
-		color: typeof obj.color === "string" ? obj.color : undefined,
 	};
 }
 
@@ -420,15 +444,14 @@ let lastPublishedModeKey: string | undefined;
 function publishMode(pi: ExtensionAPI): void {
 	let value: ModeMailboxValue = null;
 	if (runtime.overlayEnabled && runtime.currentMode !== "" && runtime.currentMode !== CUSTOM_MODE_NAME) {
-		const spec = runtime.data.modes[runtime.currentMode];
-		value = { mode: runtime.currentMode, color: spec?.color };
+		value = { mode: runtime.currentMode, uiHints: MODE_UI_HINTS[runtime.currentMode] };
 	}
 	(globalThis as any)[MODE_MAILBOX] = value;
 
 	// Avoid duplicate change events for the same visible mode. applyMode(),
 	// model_select, thinking_level_select, and before_agent_start can all
 	// converge on the same value; amp-editor only needs one repaint.
-	const key = value ? `${value.mode}:${value.color ?? ""}` : "custom";
+	const key = value ? value.mode : "custom";
 	if (key === lastPublishedModeKey) return;
 	lastPublishedModeKey = key;
 
@@ -650,34 +673,6 @@ async function cycleMode(pi: ExtensionAPI, ctx: ExtensionContext, direction: 1 |
 	await run;
 }
 
-function isSimpleModeColor(value: string): value is SimpleModeColor {
-	return (SIMPLE_MODE_COLORS as readonly string[]).includes(value);
-}
-
-/**
- * Resolve a mode color into an ANSI string. amp-editor uses this for the mode
- * badge in the top border.
- */
-export function getModeColorAnsi(color: string | undefined): string | undefined {
-	if (!color) return undefined;
-	if (isSimpleModeColor(color)) {
-		const map: Record<SimpleModeColor, string> = {
-			red: "\u001b[31m",
-			yellow: "\u001b[33m",
-			green: "\u001b[32m",
-			cyan: "\u001b[36m",
-			blue: "\u001b[34m",
-			purple: "\u001b[35m",
-			gray: "\u001b[90m",
-			white: "\u001b[37m",
-		};
-		return map[color];
-	}
-	// Legacy theme token names (e.g. "accent", "warning") can't be resolved
-	// without a Theme; amp-editor falls back to the thinking color in that case.
-	return undefined;
-}
-
 // =============================================================================
 // UI: mode management
 // =============================================================================
@@ -738,16 +733,6 @@ async function pickThinkingLevelForModeUI(
 	if (choice === THINKING_UNSET_LABEL) return null;
 	if (ALL_THINKING_LEVELS.includes(choice as ThinkingLevel)) return choice as ThinkingLevel;
 	return undefined;
-}
-
-async function pickColorForModeUI(ctx: ExtensionContext, _current: string | undefined): Promise<string | null | undefined> {
-	if (!ctx.hasUI) return undefined;
-
-	const options = [COLOR_UNSET_LABEL, ...SIMPLE_MODE_COLORS];
-	const choice = await ctx.ui.select("Border color", options);
-	if (!choice) return undefined;
-	if (choice === COLOR_UNSET_LABEL) return null;
-	return choice;
 }
 
 function renameModesRecord(modes: Record<string, ModeSpec>, oldName: string, newName: string): Record<string, ModeSpec> {
@@ -832,11 +817,10 @@ async function editModeUI(pi: ExtensionAPI, ctx: ExtensionContext, mode: string)
 
 		const modelLabel = spec.provider && spec.modelId ? `${spec.provider}/${spec.modelId}` : "(no model)";
 		const thinkingLabel = spec.thinkingLevel ?? THINKING_UNSET_LABEL;
-		const colorLabel = spec.color ?? COLOR_UNSET_LABEL;
 
-		const actions = ["Change name", "Change model", "Change thinking level", "Change border color", "Delete mode", MODE_UI_BACK];
+		const actions = ["Change name", "Change model", "Change thinking level", "Delete mode", MODE_UI_BACK];
 		const action = await ctx.ui.select(
-			`Edit mode "${modeName}"  model: ${modelLabel}  thinking: ${thinkingLabel}  color: ${colorLabel}`,
+			`Edit mode "${modeName}"  model: ${modelLabel}  thinking: ${thinkingLabel}`,
 			actions,
 		);
 		if (!action || action === MODE_UI_BACK) return;
@@ -884,22 +868,6 @@ async function editModeUI(pi: ExtensionAPI, ctx: ExtensionContext, mode: string)
 				await syncModeFromCurrentSelection(pi, ctx);
 			}
 			ctx.ui.notify(`Updated thinking level for "${modeName}"`, "info");
-			continue;
-		}
-
-		if (action === "Change border color") {
-			const color = await pickColorForModeUI(ctx, spec.color);
-			if (color === undefined) continue;
-
-			await mutateModesFile(pi, ctx, (data) => {
-				const m = data.modes[modeName] ?? {};
-				if (color === null) delete m.color;
-				else m.color = color;
-				data.modes[modeName] = m;
-			});
-
-			publishMode(pi);
-			ctx.ui.notify(`Updated border color for "${modeName}"`, "info");
 			continue;
 		}
 

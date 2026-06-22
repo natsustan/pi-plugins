@@ -1,8 +1,8 @@
 # amp-modes
 
 [pi](https://github.com/earendil-works/pi-mono) extension: named
-**model + thinking level (+ color) presets** for pi — switch all three in one
-step (`rush` / `smart` / `deep` by default).
+**model + thinking level presets** for pi — switch both in one step
+(`rush` / `smart` / `deep` by default).
 
 Split out of `amp-flow` so the workflow extensions (handoff / subagent / btw)
 and the mode manager can be installed and versioned independently.
