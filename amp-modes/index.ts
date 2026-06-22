@@ -16,6 +16,7 @@
  *   /mode store [name] save current selection into a mode
  *   /mode configure    configuration UI
  *   Ctrl+Shift+S       open picker
+ *   Ctrl+S             cycle deep → rush → smart
  *
  * Config: .pi/modes.json (project) → ~/.pi/agent/modes.json (global).
  * Setting `"modes": {}` disables the overlay (labels, shortcuts) while
@@ -81,6 +82,7 @@ type LoadedModes = {
 	explicitlyEmptyModes: boolean;
 	/** True when the file did not exist and we fell back to bootstrap defaults. */
 	fromBootstrap: boolean;
+	loadError?: string;
 };
 
 const CUSTOM_MODE_NAME = "custom" as const;
@@ -301,6 +303,15 @@ async function loadModesFile(filePath: string): Promise<LoadedModes> {
 				? (parsedModesRaw as Record<string, unknown>)
 				: undefined;
 
+		if (!hasModesProp || !modesRaw) {
+			return {
+				data: createBootstrapModesFile(),
+				explicitlyEmptyModes: false,
+				fromBootstrap: false,
+				loadError: `${filePath} does not contain a valid modes object`,
+			};
+		}
+
 		if (hasModesProp && modesRaw && Object.keys(modesRaw).length === 0) {
 			return {
 				data: { version: 1, currentMode: "", modes: {}, lockThinkingWhenModeActive: readLockThinkingFlag(parsed) },
@@ -319,13 +330,26 @@ async function loadModesFile(filePath: string): Promise<LoadedModes> {
 		const file: ModesFile = { version: 1, currentMode, modes, lockThinkingWhenModeActive };
 
 		if (orderedModeNames(file.modes).length === 0) {
-			return { data: createBootstrapModesFile(), explicitlyEmptyModes: false, fromBootstrap: true };
+			return {
+				data: createBootstrapModesFile(),
+				explicitlyEmptyModes: false,
+				fromBootstrap: false,
+				loadError: `${filePath} does not contain any named modes`,
+			};
 		}
 
 		ensureCurrentModeValid(file);
 		return { data: file, explicitlyEmptyModes: false, fromBootstrap: false };
-	} catch {
-		return { data: createBootstrapModesFile(), explicitlyEmptyModes: false, fromBootstrap: true };
+	} catch (error: any) {
+		if (error?.code === "ENOENT") {
+			return { data: createBootstrapModesFile(), explicitlyEmptyModes: false, fromBootstrap: true };
+		}
+		return {
+			data: createBootstrapModesFile(),
+			explicitlyEmptyModes: false,
+			fromBootstrap: false,
+			loadError: error instanceof Error ? error.message : String(error),
+		};
 	}
 }
 
@@ -375,6 +399,9 @@ const runtime: ModeRuntime = {
 // We track model select events to avoid stale ctx.model snapshots.
 let lastObservedModel: { provider?: string; modelId?: string } = {};
 
+// Serializes cycle shortcut repeats so rapid key repeats can't race mode inference.
+let modeCycleQueue: Promise<void> = Promise.resolve();
+
 // Re-entrancy guard for the thinking lock: our revert calls pi.setThinkingLevel(),
 // which re-emits thinking_level_select synchronously. This flag short-circuits the
 // re-entry so we don't loop.
@@ -395,6 +422,10 @@ async function ensureRuntime(_pi: ExtensionAPI, ctx: ExtensionContext): Promise<
 		runtime.explicitlyEmptyModes = loaded.explicitlyEmptyModes;
 		runtime.overlayEnabled = !loaded.explicitlyEmptyModes && orderedModeNames(loaded.data.modes).length > 0;
 		runtime.lockThinkingWhenModeActive = loaded.data.lockThinkingWhenModeActive !== false;
+
+		if (loaded.loadError && ctx.hasUI) {
+			ctx.ui.notify(`Could not read modes config; using defaults without overwriting it. ${loaded.loadError}`, "warning");
+		}
 
 		// First run: no modes.json anywhere. Persist the bootstrap defaults so
 		// the user can discover and edit them. Ignore write errors gracefully.
@@ -518,13 +549,23 @@ function inferModeFromSelection(selection: SelectionSnapshot, data: ModesFile): 
 
 	const names = orderedModeNames(data.modes);
 	if (supportsThinking) {
+		const candidates: string[] = [];
 		for (const name of names) {
 			const spec = data.modes[name];
 			if (!spec) continue;
 			if (spec.provider && spec.provider !== provider) continue;
 			if (spec.modelId && spec.modelId !== modelId) continue;
-			if ((spec.thinkingLevel ?? undefined) !== thinkingLevel) continue;
-			return name;
+			candidates.push(name);
+		}
+		for (const name of candidates) {
+			const spec = data.modes[name];
+			if (!spec) continue;
+			if (spec.thinkingLevel === thinkingLevel) return name;
+		}
+		for (const name of candidates) {
+			const spec = data.modes[name];
+			if (!spec) continue;
+			if (!spec.thinkingLevel) return name;
 		}
 		return null;
 	}
@@ -665,6 +706,28 @@ async function applyMode(pi: ExtensionAPI, ctx: ExtensionContext, mode: string):
 	// Ensure model+thinking pairing still resolves exactly (handles clamping/overrides).
 	// syncModeFromCurrentSelection() publishes the mode, so don't publish again here.
 	await syncModeFromCurrentSelection(pi, ctx);
+}
+
+const QUICK_CYCLE_MODES = ["deep", "rush", "smart"];
+
+async function cycleModeNow(pi: ExtensionAPI, ctx: ExtensionContext, direction: 1 | -1 = 1): Promise<void> {
+	await ensureRuntime(pi, ctx);
+	if (!runtime.overlayEnabled) return;
+
+	const quickNames = QUICK_CYCLE_MODES.filter((name) => runtime.data.modes[name]);
+	const names = quickNames.length > 0 ? quickNames : orderedModeNames(runtime.data.modes);
+	if (names.length === 0) return;
+
+	const baseMode = runtime.currentMode === CUSTOM_MODE_NAME ? runtime.lastRealMode : runtime.currentMode;
+	const idx = names.includes(baseMode) ? names.indexOf(baseMode) : -1;
+	const next = names[(idx + direction + names.length) % names.length] ?? names[0]!;
+	await applyMode(pi, ctx, next);
+}
+
+async function cycleMode(pi: ExtensionAPI, ctx: ExtensionContext, direction: 1 | -1 = 1): Promise<void> {
+	const run = modeCycleQueue.then(() => cycleModeNow(pi, ctx, direction), () => cycleModeNow(pi, ctx, direction));
+	modeCycleQueue = run.then(() => undefined, () => undefined);
+	await run;
 }
 
 // =============================================================================
@@ -1031,6 +1094,13 @@ export default function (pi: ExtensionAPI) {
 		description: "Select prompt mode",
 		handler: async (ctx) => {
 			await selectModeUI(pi, ctx);
+		},
+	});
+
+	pi.registerShortcut("ctrl+s", {
+		description: "Cycle prompt mode (deep → rush → smart)",
+		handler: async (ctx) => {
+			await cycleMode(pi, ctx, 1);
 		},
 	});
 

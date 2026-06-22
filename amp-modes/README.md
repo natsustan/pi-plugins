@@ -13,6 +13,7 @@ and the mode manager can be installed and versioned independently.
 /mode store fast   # save current selection into a mode
 /mode configure    # add / rename / delete / edit modes
 Ctrl+Shift+S       # open picker
+Ctrl+S             # cycle deep -> rush -> smart
 ```
 
 Bootstrap modes (written to `~/.pi/agent/modes.json` on first use; edit there
