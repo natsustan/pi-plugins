@@ -39,6 +39,8 @@ import fs from "node:fs/promises";
 
 /** Global mailbox key shared with amp-editor. Symbol.for → globally unique. */
 const MODE_MAILBOX = Symbol.for("amp.modes.current");
+/** Optional bridge for other extensions that need a real mode switch. */
+const MODE_APPLY_BRIDGE = Symbol.for("amp.modes.apply");
 /** Event channel — MUST match amp-editor/index.ts exactly. */
 const MODE_CHANGE_CHANNEL = "amp:modes-change";
 
@@ -1120,6 +1122,12 @@ async function selectModeUI(pi: ExtensionAPI, ctx: ExtensionContext): Promise<vo
 // =============================================================================
 
 export default function (pi: ExtensionAPI) {
+	const applyBridge = async (targetPi: ExtensionAPI, ctx: ExtensionContext, mode: string) => {
+		await applyMode(targetPi, ctx, mode);
+		return true;
+	};
+	(globalThis as any)[MODE_APPLY_BRIDGE] = applyBridge;
+
 	pi.registerCommand("mode", {
 		description: "Select and configure prompt modes",
 		handler: async (args, ctx) => {
@@ -1194,6 +1202,9 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		if ((globalThis as any)[MODE_APPLY_BRIDGE] === applyBridge) {
+			delete (globalThis as any)[MODE_APPLY_BRIDGE];
+		}
 		clearPublishedMode(pi);
 	});
 

@@ -3,13 +3,15 @@
 [pi](https://github.com/earendil-works/pi-mono) extensions that bring Amp
 Code–style workflows to pi: **handoff**, **subagent**, and **/btw**.
 
-Three cooperating extensions in one package:
+Three cooperating extensions (plus a `session_query` tool and a
+`session-query` skill) in one package:
 
 | Extension | Entry point | What it does |
 |-----------|-------------|--------------|
-| handoff | `/handoff <goal>` + `handoff` tool | Generate a focused summary of the current conversation and start a new session seeded with it (non-lossy alternative to compaction). |
-| subagent | `subagent` tool | Spawn one or more isolated in-process subagents with the built-in tools (read/bash/edit/write). Parallel, context-saving. |
+| handoff | `/handoff [-mode <name>] [-model <provider/id>] <goal>` + `handoff` tool | Generate a focused summary of the current conversation and start a new session seeded with it (non-lossy alternative to compaction). Restores the current model+thinking, or applies `-mode`/`-model`. |
+| subagent | `subagent` tool | Spawn one or more isolated in-process subagents with the active built-in tools (read/write/edit/bash + grep/find/ls). Parallel, context-saving. |
 | btw | `/btw <prompt>` | Run a background subagent with a live progress widget; result lands as a rendered chat message. Sees the current conversation. |
+| session-query | `session_query` tool | Query any `.jsonl` session file (e.g. a handoff parent) for context/decisions, using that session's own model. |
 
 ## Install
 
@@ -32,7 +34,7 @@ npm install
 
 ### 3. Reload
 
-Run `/reload` in pi (or restart). The command and the two tools appear.
+Run `/reload` in pi (or restart). The command and tools appear.
 
 ## Usage
 
@@ -42,23 +44,38 @@ When a conversation gets long or you want to branch into a focused task:
 
 ```
 /handoff now implement this for teams as well
+/handoff -mode rush execute phase one of the plan
+/handoff -model anthropic/claude-haiku-4-5 check other places that need this fix
 ```
 
-The summary is generated with the current session's model, then a new session
-starts with the goal + parent-session reference + summary as the first prompt.
+Optional flags (can be combined):
+- `-mode <name>` — start the new session in a named modes.json preset (e.g.
+  `rush`, `smart`, `deep`), applying its model + thinking level.
+- `-model <provider/id>` — start the new session with a specific model.
+
+Without flags, the new session inherits the **current** session's model +
+thinking (restored explicitly, since the underlying session replacement would
+otherwise reset to pi's default). The summary is always generated with the
+current session's model before switching.
+
+The generated prompt includes a **Parent session** reference and a stable
+**Parent session leaf**; load the bundled `session-query` skill so the new
+session can look up that exact parent branch via the `session_query` tool.
 Navigate sessions with `/resume`.
-
-The agent can also hand off when you ask explicitly ("hand this off to a new
-session") — it calls the `handoff` tool, which switches after the current turn.
-
-The new session inherits pi's default model. Switch with `/model` or `Ctrl+P`.
 
 ### Subagent
 
 Ask the agent to "use subagents to …" for independent, context-hungry tasks.
 The `subagent` tool accepts an array of task prompts; each becomes a parallel
-subagent with a fresh context and the four built-in tools. Only the final text
-summary of each returns to the parent.
+subagent with a fresh context and the active built-in tools. Read-only tools
+(read / grep / find / ls) are mirrored when enabled. Mutating tools
+(write / edit / bash) are not mirrored. Only the final text summary of each
+returns to the parent.
+
+`tool_call` / `tool_result` events from subagents are forwarded to any
+hooks registered by extensions loaded **after** amp-flow (e.g. a policy
+extension). Mutating subagent tools stay disabled so extensions loaded
+**before** amp-flow are not bypassed.
 
 Use sparingly — subagents are non-interactive and output tokens are expensive.
 
@@ -79,17 +96,20 @@ parallel; each gets its own widget.
 - The subagent/btw tools inherit the parent's **system prompt** and **thinking
   level**, but get a **fresh message history** (only `/btw` injects a serialized
   copy of the conversation).
-- `handoff` tool-path uses a low-level `sessionManager.newSession()` plus a
-  `context`-event message filter, since tool context lacks `newSession()`.
+- `handoff` command-path uses `ctx.newSession()` with a `globalThis` stash so
+  the new session's `session_start` handler can apply the prompt + model options
+  with a fresh `pi` (the old one is stale after session replacement). The
+  tool-path uses the low-level `sessionManager.newSession()` in an `agent_end`
+  handler, since tool context lacks `newSession()`.
 
 ## Scope
 
 | Surface | Status |
 |---------|--------|
 | Model+thinking presets | Not in this package — see the separate **amp-modes** package for named presets (rush/smart/deep) and the border badge. |
-| `-mode` / `-model` flags | Not supported. Use `/model` after handoff. |
-| Custom subagent tool sets | Not supported — always read/bash/edit/write. |
-| Session-query (querying parent sessions) | Not included. |
+| `-mode` / `-model` flags | Supported on `/handoff` and the `handoff` tool. `subagent` / `/btw` run on the current model (no per-call override). |
+| Custom subagent tool sets | Not supported — mirrors the active built-in tools only. |
+| Session-query (querying parent sessions) | Included: `session_query` tool + `session-query` skill. |
 
 ## Restore / disable
 

@@ -1,10 +1,10 @@
 /**
- * subagent tool — run isolated in-process subagents with built-in tools.
+ * subagent tool — run isolated in-process subagents with read-only built-in tools.
  *
  * Also exports runSubagent() and rendering helpers, reused by btw.ts.
  *
- * A subagent gets a fresh context (no conversation history), the 4 built-in
- * tools (read/bash/edit/write), and the main agent's system prompt. It runs
+ * A subagent gets a fresh context (no conversation history), read-only
+ * inspection tools, and the main agent's system prompt. It runs
  * to completion via agentLoop() and returns a text summary.
  *
  * Multiple tasks fan out with bounded concurrency (MAX_CONCURRENCY).
@@ -25,13 +25,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	buildSessionContext,
 	convertToLlm,
-	createBashTool,
-	createEditTool,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
 	createReadTool,
-	createWriteTool,
 	getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
@@ -90,7 +87,7 @@ type ModelAuth = {
 };
 
 export interface SubagentToolEventBridge {
-	canForwardToolCalls(): boolean;
+	hasToolCallHandlers(): boolean;
 	hasToolResultHandlers(): boolean;
 	emitToolCall(event: {
 		type: "tool_call";
@@ -187,7 +184,7 @@ function toRecord(value: unknown): Record<string, unknown> {
 function buildActiveSubagentTools(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
-	toolEvents?: SubagentToolEventBridge,
+	_toolEvents?: SubagentToolEventBridge,
 ): AgentTool<any>[] {
 	const configuredTools = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
 	return pi.getActiveTools().flatMap((name): AgentTool<any>[] => {
@@ -200,13 +197,10 @@ function buildActiveSubagentTools(
 			case "bash":
 			case "edit":
 			case "write":
-				// These tools can execute commands or mutate files. If amp-flow did
-				// not see the active tool-call handlers, recreating them locally would
-				// bypass policy/sandbox extensions that loaded earlier.
-				if (!toolEvents?.canForwardToolCalls()) return [];
-				if (name === "bash") return [createBashTool(ctx.cwd)];
-				if (name === "edit") return [createEditTool(ctx.cwd)];
-				return [createWriteTool(ctx.cwd)];
+				// These tools can execute commands or mutate files. Recreating them
+				// locally would not reliably preserve policy/sandbox hooks that
+				// registered before amp-flow loaded.
+				return [];
 			case "grep":
 				return [createGrepTool(ctx.cwd)];
 			case "find":
@@ -228,7 +222,7 @@ export function prepareSubagentRunContext(
 
 	const targetModel = ctx.model;
 	return {
-		tools: buildActiveSubagentTools(pi, ctx),
+		tools: buildActiveSubagentTools(pi, ctx, toolEvents),
 		targetModel,
 		thinkingLevel: pi.getThinkingLevel(),
 		systemPrompt: ctx.getSystemPrompt(),
@@ -302,7 +296,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		reasoning: opts.thinkingLevel !== "off" ? (opts.thinkingLevel as any) : undefined,
 	};
 	if (opts.toolEvents && opts.toolEventContext) {
-		if (opts.toolEvents.canForwardToolCalls()) {
+		if (opts.toolEvents.hasToolCallHandlers()) {
 			config.beforeToolCall = async ({ toolCall, args }: BeforeToolCallContext, signal?: AbortSignal) => {
 				if (signal?.aborted) return { block: true, reason: "Tool call aborted." };
 				return opts.toolEvents!.emitToolCall({
@@ -584,9 +578,9 @@ export default function (pi: ExtensionAPI, toolEvents?: SubagentToolEventBridge)
 		name: "subagent",
 		label: "Subagent",
 		description: [
-			"Run isolated subagents with built-in tools (read, write, edit, bash).",
+			"Run isolated subagents with read-only built-in tools (read, grep, find, ls).",
 			"Subagents have two benefits - quickly perform parallel tasks, and save space in your context window.",
-			"Subagents are suitable for independent, well-defined, context-hungry, short-output subtasks that don't need back-and-forth with the user, such as research or refactoring.",
+			"Subagents are suitable for independent, well-defined, context-hungry, short-output subtasks that don't need back-and-forth with the user, such as research, codebase investigation, or file inspection.",
 			"The downside is they are non-interactive for the user and output tokens are expensive; therefore, use them ONLY when explicitly asked or when your verbalized thinking confirms MAJOR benefits in the current situation).",
 			"(Example of a prompt you should NOT use a subagent for: 'run A B C D and provide all file contents and command outputs')",
 		].join(" "),

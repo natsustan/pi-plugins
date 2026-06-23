@@ -3,7 +3,7 @@
  *
  * Bundles three cooperating extensions:
  *   - handoff   /handoff <goal>  + handoff tool — context transfer to a new session
- *   - subagent  subagent tool    — isolated parallel subagents (read/bash/edit/write)
+ *   - subagent  subagent tool    — isolated parallel subagents (read-only inspection tools)
  *   - btw       /btw <prompt>    — background subagent with live widget
  *
  * Install: symlink this dir into ~/.pi/agent/extensions/ (or add to settings.json
@@ -14,6 +14,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import handoff from "./handoff.ts";
 import subagent, { type SubagentToolEventBridge } from "./subagent.ts";
 import btw from "./btw.ts";
+import sessionQuery from "./session-query.ts";
 
 type ExtensionHandler = (event: any, ctx: any) => unknown | Promise<unknown>;
 
@@ -29,10 +30,7 @@ function createToolEventBridge(pi: ExtensionAPI): SubagentToolEventBridge {
 	};
 
 	return {
-		// Only handlers registered after amp-flow loads are visible here. Earlier
-		// policy/sandbox hooks may still be active for the parent session, so do
-		// not expose mutating subagent tools based on this partial handler list.
-		canForwardToolCalls: () => false,
+		hasToolCallHandlers: () => toolCallHandlers.length > 0,
 		hasToolResultHandlers: () => toolResultHandlers.length > 0,
 		async emitToolCall(event, ctx) {
 			let result;
@@ -69,4 +67,5 @@ export default function (pi: ExtensionAPI) {
 	handoff(pi);
 	subagent(pi, toolEvents);
 	btw(pi, toolEvents);
+	sessionQuery(pi);
 }
