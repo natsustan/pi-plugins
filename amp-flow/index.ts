@@ -30,11 +30,6 @@ function createToolEventBridge(pi: ExtensionAPI): SubagentToolEventBridge {
 	};
 
 	return {
-		// Mutating subagent tools (bash/edit/write) are only exposed when calls can
-		// pass through captured tool_call handlers. Handlers registered before
-		// amp-flow loaded are not enumerable here, so allowing writes without any
-		// captured handler could bypass an earlier policy/sandbox extension.
-		canForwardToolCalls: () => toolCallHandlers.length > 0,
 		hasToolCallHandlers: () => toolCallHandlers.length > 0,
 		hasToolResultHandlers: () => toolResultHandlers.length > 0,
 		async emitToolCall(event, ctx) {

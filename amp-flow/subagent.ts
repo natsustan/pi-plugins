@@ -25,13 +25,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	buildSessionContext,
 	convertToLlm,
-	createBashTool,
-	createEditTool,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
 	createReadTool,
-	createWriteTool,
 	getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
@@ -90,7 +87,6 @@ type ModelAuth = {
 };
 
 export interface SubagentToolEventBridge {
-	canForwardToolCalls(): boolean;
 	hasToolCallHandlers(): boolean;
 	hasToolResultHandlers(): boolean;
 	emitToolCall(event: {
@@ -188,7 +184,7 @@ function toRecord(value: unknown): Record<string, unknown> {
 function buildActiveSubagentTools(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
-	toolEvents?: SubagentToolEventBridge,
+	_toolEvents?: SubagentToolEventBridge,
 ): AgentTool<any>[] {
 	const configuredTools = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
 	return pi.getActiveTools().flatMap((name): AgentTool<any>[] => {
@@ -201,13 +197,10 @@ function buildActiveSubagentTools(
 			case "bash":
 			case "edit":
 			case "write":
-				// These tools can execute commands or mutate files. If amp-flow did
-				// not see the active tool-call handlers, recreating them locally would
-				// bypass policy/sandbox extensions that loaded earlier.
-				if (!toolEvents?.canForwardToolCalls()) return [];
-				if (name === "bash") return [createBashTool(ctx.cwd)];
-				if (name === "edit") return [createEditTool(ctx.cwd)];
-				return [createWriteTool(ctx.cwd)];
+				// These tools can execute commands or mutate files. Recreating them
+				// locally would not reliably preserve policy/sandbox hooks that
+				// registered before amp-flow loaded.
+				return [];
 			case "grep":
 				return [createGrepTool(ctx.cwd)];
 			case "find":

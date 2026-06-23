@@ -68,15 +68,14 @@ Navigate sessions with `/resume`.
 Ask the agent to "use subagents to …" for independent, context-hungry tasks.
 The `subagent` tool accepts an array of task prompts; each becomes a parallel
 subagent with a fresh context and the active built-in tools. Read-only tools
-(read / grep / find / ls) are always mirrored when enabled. Mutating tools
-(write / edit / bash) are only mirrored when amp-flow can forward their
-`tool_call` events through captured policy hooks. Only the final text summary of
-each returns to the parent.
+(read / grep / find / ls) are mirrored when enabled. Mutating tools
+(write / edit / bash) are not mirrored. Only the final text summary of each
+returns to the parent.
 
 `tool_call` / `tool_result` events from subagents are forwarded to any
-`tool_call` hooks registered by extensions loaded **after** amp-flow (e.g. a
-policy extension). If no such hooks are visible, mutating subagent tools are not
-enabled, which avoids bypassing hooks from extensions loaded **before** amp-flow.
+hooks registered by extensions loaded **after** amp-flow (e.g. a policy
+extension). Mutating subagent tools stay disabled so extensions loaded
+**before** amp-flow are not bypassed.
 
 Use sparingly — subagents are non-interactive and output tokens are expensive.
 
