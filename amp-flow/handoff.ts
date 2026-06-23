@@ -335,12 +335,12 @@ async function performHandoff(
 	if (fromCommand) {
 		// Command path: full runtime replacement via newSession(). The new
 		// session's session_start handler picks up the stash and applies it with
-		// a fresh `pi`. Without -mode/-model, we restore the current model +
-		// thinking so the new session doesn't silently drop to pi's default.
+		// a fresh `pi`. Always restore the current model + thinking first; then
+		// -mode/-model override only the fields they explicitly specify.
 		const cmdCtx = ctx as ExtensionCommandContext;
 		const hasOptions = !!options?.mode || !!options?.model;
 		const restore: HandoffSelection | undefined =
-			!hasOptions && ctx.model
+			ctx.model
 				? {
 					provider: ctx.model.provider,
 					modelId: ctx.model.id,

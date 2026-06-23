@@ -151,19 +151,37 @@ export default function (pi: ExtensionAPI) {
 
 			// Prefer the queried session's own model (resolved from its entry
 			// tree, honoring model_change entries); fall back to the current
-			// session's model.
-			let queryModel = ctx.model;
+			// session's model if that model is missing or has no credentials.
+			const queryModels = [];
 			if (context.model) {
 				const sessionModel = ctx.modelRegistry.find(context.model.provider, context.model.modelId);
-				if (sessionModel) queryModel = sessionModel;
+				if (sessionModel) queryModels.push(sessionModel);
 			}
-			if (!queryModel) {
+			if (ctx.model && !queryModels.some((model) => model.provider === ctx.model!.provider && model.id === ctx.model!.id)) {
+				queryModels.push(ctx.model);
+			}
+			if (queryModels.length === 0) {
 				return errorResult("Error: No model available to analyze the session.");
 			}
 
 			try {
-				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(queryModel);
-				if (!auth.ok) return errorResult(`Error: ${auth.error}`);
+				let selected:
+					| {
+						model: typeof queryModels[number];
+						apiKey?: string;
+						headers?: Record<string, string>;
+					}
+					| undefined;
+				let lastAuthError: string | undefined;
+				for (const model of queryModels) {
+					const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+					if (auth.ok) {
+						selected = { model, apiKey: auth.apiKey, headers: auth.headers };
+						break;
+					}
+					lastAuthError = auth.error;
+				}
+				if (!selected) return errorResult(`Error: ${lastAuthError ?? "No model credentials available."}`);
 
 				const userMessage: Message = {
 					role: "user",
@@ -177,9 +195,9 @@ export default function (pi: ExtensionAPI) {
 				};
 
 				const response = await complete(
-					queryModel,
+					selected.model,
 					{ systemPrompt: QUERY_SYSTEM_PROMPT, messages: [userMessage] },
-					{ apiKey: auth.apiKey, headers: auth.headers, signal },
+					{ apiKey: selected.apiKey, headers: selected.headers, signal },
 				);
 
 				if (response.stopReason === "aborted") {
