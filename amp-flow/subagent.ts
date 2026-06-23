@@ -1,10 +1,10 @@
 /**
- * subagent tool — run isolated in-process subagents with built-in tools.
+ * subagent tool — run isolated in-process subagents with read-only built-in tools.
  *
  * Also exports runSubagent() and rendering helpers, reused by btw.ts.
  *
- * A subagent gets a fresh context (no conversation history), the 4 built-in
- * tools (read/bash/edit/write), and the main agent's system prompt. It runs
+ * A subagent gets a fresh context (no conversation history), read-only
+ * inspection tools, and the main agent's system prompt. It runs
  * to completion via agentLoop() and returns a text summary.
  *
  * Multiple tasks fan out with bounded concurrency (MAX_CONCURRENCY).
@@ -578,9 +578,9 @@ export default function (pi: ExtensionAPI, toolEvents?: SubagentToolEventBridge)
 		name: "subagent",
 		label: "Subagent",
 		description: [
-			"Run isolated subagents with built-in tools (read, write, edit, bash).",
+			"Run isolated subagents with read-only built-in tools (read, grep, find, ls).",
 			"Subagents have two benefits - quickly perform parallel tasks, and save space in your context window.",
-			"Subagents are suitable for independent, well-defined, context-hungry, short-output subtasks that don't need back-and-forth with the user, such as research or refactoring.",
+			"Subagents are suitable for independent, well-defined, context-hungry, short-output subtasks that don't need back-and-forth with the user, such as research, codebase investigation, or file inspection.",
 			"The downside is they are non-interactive for the user and output tokens are expensive; therefore, use them ONLY when explicitly asked or when your verbalized thinking confirms MAJOR benefits in the current situation).",
 			"(Example of a prompt you should NOT use a subagent for: 'run A B C D and provide all file contents and command outputs')",
 		].join(" "),

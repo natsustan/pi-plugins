@@ -3,7 +3,7 @@
  *
  * Bundles three cooperating extensions:
  *   - handoff   /handoff <goal>  + handoff tool — context transfer to a new session
- *   - subagent  subagent tool    — isolated parallel subagents (read/bash/edit/write)
+ *   - subagent  subagent tool    — isolated parallel subagents (read-only inspection tools)
  *   - btw       /btw <prompt>    — background subagent with live widget
  *
  * Install: symlink this dir into ~/.pi/agent/extensions/ (or add to settings.json
