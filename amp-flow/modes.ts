@@ -3,8 +3,9 @@
  *
  * amp-modes owns the full modes runtime (UI, editor badge, thinking lock);
  * here we only need the file format to resolve `-mode <name>` and
- * `-model <provider/id>` flags for handoff. Reads project `.pi/modes.json`
- * first, then global `~/.pi/agent/modes.json`.
+ * `-model <provider/id>` flags for handoff. Matches amp-modes path resolution:
+ * use project `.pi/modes.json` exclusively when it exists, otherwise global
+ * `~/.pi/agent/modes.json`.
  */
 import * as os from "node:os";
 import * as path from "node:path";
@@ -54,10 +55,9 @@ export function loadModeSpec(
 	cwd: string,
 	modeName: string,
 ): ModeSpec | undefined {
-	const candidates = [
-		path.join(cwd, ".pi", "modes.json"),
-		path.join(getGlobalAgentDir(), "modes.json"),
-	];
+	const projectPath = path.join(cwd, ".pi", "modes.json");
+	const globalPath = path.join(getGlobalAgentDir(), "modes.json");
+	const candidates = fs.existsSync(projectPath) ? [projectPath] : [globalPath];
 
 	for (const modesPath of candidates) {
 		let raw: string;

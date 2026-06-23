@@ -80,6 +80,12 @@ type HandoffSelection = {
 };
 
 const HANDOFF_GLOBAL_KEY = Symbol.for("amp-flow-handoff-pending");
+const AMP_MODES_APPLY_KEY = Symbol.for("amp.modes.apply");
+type AmpModesApply = (
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	mode: string,
+) => Promise<boolean | void> | boolean | void;
 type PendingHandoffGlobal = {
 	prompt: string;
 	options?: HandoffOptions;
@@ -95,6 +101,17 @@ function setPendingHandoffGlobal(data: PendingHandoffGlobal): void {
 	} else {
 		delete (globalThis as any)[HANDOFF_GLOBAL_KEY];
 	}
+}
+
+async function applyModeViaAmpModes(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	mode: string,
+): Promise<boolean> {
+	const apply = (globalThis as any)[AMP_MODES_APPLY_KEY] as AmpModesApply | undefined;
+	if (typeof apply !== "function") return false;
+	const result = await apply(pi, ctx, mode);
+	return result !== false;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +213,8 @@ async function applyHandoffOptions(
 	options: HandoffOptions,
 ): Promise<void> {
 	if (options.mode) {
-		const spec = loadModeSpec(ctx.cwd, options.mode);
+		const appliedByAmpModes = await applyModeViaAmpModes(pi, ctx, options.mode);
+		const spec = appliedByAmpModes ? undefined : loadModeSpec(ctx.cwd, options.mode);
 		if (spec) {
 			if (spec.provider && spec.modelId) {
 				const model = ctx.modelRegistry.find(spec.provider, spec.modelId);
@@ -226,7 +244,7 @@ async function applyHandoffOptions(
 				// Mode has no model component; apply thinking alone.
 				pi.setThinkingLevel(spec.thinkingLevel as ThinkingLevel);
 			}
-		} else if (ctx.hasUI) {
+		} else if (!appliedByAmpModes && ctx.hasUI) {
 			ctx.ui.notify(`Handoff: unknown mode "${options.mode}"`, "warning");
 		}
 	}
