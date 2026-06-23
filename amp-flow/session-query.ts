@@ -11,6 +11,7 @@ import { complete, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	SessionManager,
+	buildSessionContext,
 	convertToLlm,
 	getMarkdownTheme,
 	serializeConversation,
@@ -20,6 +21,7 @@ import { Type } from "typebox";
 
 type SessionQueryDetails = {
 	sessionPath?: string;
+	leafId?: string;
 	question?: string;
 	answer?: string;
 	messageCount?: number;
@@ -63,6 +65,12 @@ export default function (pi: ExtensionAPI) {
 				description:
 					"Full path to the session file (e.g., /home/user/.pi/agent/sessions/.../session.jsonl). The handoff prompt includes this as the 'Parent session' path.",
 			}),
+			leafId: Type.Optional(
+				Type.String({
+					description:
+						"Optional stable parent session leaf id from a handoff prompt. Use this with the Parent session leaf value to query the exact branch that produced the handoff.",
+				}),
+			),
 			question: Type.String({
 				description:
 					"What you want to know about that session (e.g., 'What files were modified?' or 'What approach was chosen?')",
@@ -96,7 +104,11 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			const { sessionPath, question } = params as { sessionPath: string; question: string };
+			const { sessionPath, leafId, question } = params as {
+				sessionPath: string;
+				leafId?: string;
+				question: string;
+			};
 
 			const errorResult = (text: string) => ({
 				content: [{ type: "text" as const, text }],
@@ -114,12 +126,17 @@ export default function (pi: ExtensionAPI) {
 				return errorResult(`Error loading session: ${err}`);
 			}
 
-			// Build the session context the same way pi does for a real turn —
-			// this resolves compaction summaries, branch summaries, and custom
-			// context messages instead of sending only raw message entries
-			// (which would omit summaries yet still include pre-compaction
-			// history after /compact).
-			const context = sessionManager.buildSessionContext();
+			const targetLeafId = leafId?.trim();
+			if (targetLeafId && !sessionManager.getEntry(targetLeafId)) {
+				return errorResult(`Error: leafId not found in session: ${targetLeafId}`);
+			}
+
+			// Build the session context the same way pi does for a real turn. When
+			// a handoff includes a parent leaf id, use it so later parent-session
+			// appends or branch changes do not affect the query.
+			const context = targetLeafId
+				? buildSessionContext(sessionManager.getEntries(), targetLeafId)
+				: sessionManager.buildSessionContext();
 
 			if (context.messages.length === 0) {
 				return {
@@ -179,7 +196,7 @@ export default function (pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text" as const, text: answer }],
-					details: { sessionPath, question, answer, messageCount: context.messages.length, truncated },
+					details: { sessionPath, leafId: targetLeafId, question, answer, messageCount: context.messages.length, truncated },
 				};
 			} catch (err) {
 				return errorResult(`Error querying session: ${err}`);

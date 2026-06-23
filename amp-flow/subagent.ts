@@ -229,7 +229,7 @@ export function prepareSubagentRunContext(
 
 	const targetModel = ctx.model;
 	return {
-		tools: buildActiveSubagentTools(pi, ctx),
+		tools: buildActiveSubagentTools(pi, ctx, toolEvents),
 		targetModel,
 		thinkingLevel: pi.getThinkingLevel(),
 		systemPrompt: ctx.getSystemPrompt(),

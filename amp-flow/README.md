@@ -58,22 +58,25 @@ thinking (restored explicitly, since the underlying session replacement would
 otherwise reset to pi's default). The summary is always generated with the
 current session's model before switching.
 
-The generated prompt includes a **Parent session** reference; load the bundled
-`session-query` skill so the new session can look the parent up via the
-`session_query` tool. Navigate sessions with `/resume`.
+The generated prompt includes a **Parent session** reference and a stable
+**Parent session leaf**; load the bundled `session-query` skill so the new
+session can look up that exact parent branch via the `session_query` tool.
+Navigate sessions with `/resume`.
 
 ### Subagent
 
 Ask the agent to "use subagents to …" for independent, context-hungry tasks.
 The `subagent` tool accepts an array of task prompts; each becomes a parallel
-subagent with a fresh context and the active built-in tools
-(read / write / edit / bash, plus grep / find / ls when enabled). Only the
-final text summary of each returns to the parent.
+subagent with a fresh context and the active built-in tools. Read-only tools
+(read / grep / find / ls) are always mirrored when enabled. Mutating tools
+(write / edit / bash) are only mirrored when amp-flow can forward their
+`tool_call` events through captured policy hooks. Only the final text summary of
+each returns to the parent.
 
 `tool_call` / `tool_result` events from subagents are forwarded to any
 `tool_call` hooks registered by extensions loaded **after** amp-flow (e.g. a
-policy extension); hooks from extensions loaded **before** amp-flow aren't
-visible to it and won't apply to subagent calls.
+policy extension). If no such hooks are visible, mutating subagent tools are not
+enabled, which avoids bypassing hooks from extensions loaded **before** amp-flow.
 
 Use sparingly — subagents are non-interactive and output tokens are expensive.
 

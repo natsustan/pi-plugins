@@ -138,9 +138,15 @@ async function generateContextSummary(
 }
 
 /** Build the final prompt: goal first, parent session ref, then summary. */
-function buildFinalPrompt(goal: string, summary: string, parentSession: string | undefined): string {
+function buildFinalPrompt(
+	goal: string,
+	summary: string,
+	parentSession: string | undefined,
+	parentLeafId: string | null,
+): string {
 	if (parentSession) {
-		return `${goal}\n\n**Parent session:** \`${parentSession}\`\n\n${summary}`;
+		const leafLine = parentLeafId ? `\n**Parent session leaf:** \`${parentLeafId}\`` : "";
+		return `${goal}\n\n**Parent session:** \`${parentSession}\`${leafLine}\n\n${summary}`;
 	}
 	return `${goal}\n\n${summary}`;
 }
@@ -294,6 +300,7 @@ async function performHandoff(
 	if (messages.length === 0) return "No conversation to hand off.";
 
 	const parentSession = ctx.sessionManager.getSessionFile();
+	const parentLeafId = ctx.sessionManager.getLeafId();
 
 	// Generate summary with a loader UI (abortable).
 	const summary = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
@@ -323,7 +330,7 @@ async function performHandoff(
 
 	if (summary == null) return "Handoff cancelled.";
 
-	const finalPrompt = buildFinalPrompt(goal, summary, parentSession);
+	const finalPrompt = buildFinalPrompt(goal, summary, parentSession, parentLeafId);
 
 	if (fromCommand) {
 		// Command path: full runtime replacement via newSession(). The new
