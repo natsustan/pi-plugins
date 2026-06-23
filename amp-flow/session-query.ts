@@ -17,6 +17,7 @@ import {
 	serializeConversation,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import * as fs from "node:fs";
 import { Type } from "typebox";
 
 type SessionQueryDetails = {
@@ -121,6 +122,10 @@ export default function (pi: ExtensionAPI) {
 
 			let sessionManager: SessionManager;
 			try {
+				const stat = fs.statSync(sessionPath);
+				if (!stat.isFile()) {
+					return errorResult(`Error: Invalid session path. Expected a session file, got: ${sessionPath}`);
+				}
 				sessionManager = SessionManager.open(sessionPath);
 			} catch (err) {
 				return errorResult(`Error loading session: ${err}`);
