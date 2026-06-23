@@ -14,7 +14,6 @@ import {
 	convertToLlm,
 	getMarkdownTheme,
 	serializeConversation,
-	type ModelChangeEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -115,15 +114,14 @@ export default function (pi: ExtensionAPI) {
 				return errorResult(`Error loading session: ${err}`);
 			}
 
-			const branch = sessionManager.getBranch();
-			const messages = [];
-			let lastModelChange: ModelChangeEntry | undefined;
-			for (const entry of branch) {
-				if (entry.type === "message") messages.push(entry.message);
-				if (entry.type === "model_change") lastModelChange = entry;
-			}
+			// Build the session context the same way pi does for a real turn —
+			// this resolves compaction summaries, branch summaries, and custom
+			// context messages instead of sending only raw message entries
+			// (which would omit summaries yet still include pre-compaction
+			// history after /compact).
+			const context = sessionManager.buildSessionContext();
 
-			if (messages.length === 0) {
+			if (context.messages.length === 0) {
 				return {
 					content: [{ type: "text" as const, text: "Session is empty — no messages found." }],
 					details: { empty: true },
@@ -131,14 +129,15 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const { text: conversationText, truncated } = truncateSessionText(
-				serializeConversation(convertToLlm(messages)),
+				serializeConversation(convertToLlm(context.messages)),
 			);
 
-			// Prefer the queried session's own model (last model_change entry);
-			// fall back to the current session's model.
+			// Prefer the queried session's own model (resolved from its entry
+			// tree, honoring model_change entries); fall back to the current
+			// session's model.
 			let queryModel = ctx.model;
-			if (lastModelChange) {
-				const sessionModel = ctx.modelRegistry.find(lastModelChange.provider, lastModelChange.modelId);
+			if (context.model) {
+				const sessionModel = ctx.modelRegistry.find(context.model.provider, context.model.modelId);
 				if (sessionModel) queryModel = sessionModel;
 			}
 			if (!queryModel) {
@@ -180,7 +179,7 @@ export default function (pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text" as const, text: answer }],
-					details: { sessionPath, question, answer, messageCount: messages.length, truncated },
+					details: { sessionPath, question, answer, messageCount: context.messages.length, truncated },
 				};
 			} catch (err) {
 				return errorResult(`Error querying session: ${err}`);

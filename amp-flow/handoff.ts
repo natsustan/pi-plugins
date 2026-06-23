@@ -195,15 +195,29 @@ async function applyHandoffOptions(
 			if (spec.provider && spec.modelId) {
 				const model = ctx.modelRegistry.find(spec.provider, spec.modelId);
 				if (model) {
-					await pi.setModel(model);
+					// setModel returns false when the model is in the registry
+					// but has no usable API key. Apply the mode's thinking level
+					// together with the model so a failed switch can't leave the
+					// preset half-applied (thinking changed, model unchanged).
+					const ok = await pi.setModel(model);
+					if (ok) {
+						if (spec.thinkingLevel) {
+							pi.setThinkingLevel(spec.thinkingLevel as ThinkingLevel);
+						}
+					} else if (ctx.hasUI) {
+						ctx.ui.notify(
+							`Handoff: mode "${options.mode}" model ${spec.provider}/${spec.modelId} has no API key; mode not applied`,
+							"warning",
+						);
+					}
 				} else if (ctx.hasUI) {
 					ctx.ui.notify(
 						`Handoff: mode "${options.mode}" references unknown model ${spec.provider}/${spec.modelId}`,
 						"warning",
 					);
 				}
-			}
-			if (spec.thinkingLevel) {
+			} else if (spec.thinkingLevel) {
+				// Mode has no model component; apply thinking alone.
 				pi.setThinkingLevel(spec.thinkingLevel as ThinkingLevel);
 			}
 		} else if (ctx.hasUI) {
@@ -218,7 +232,13 @@ async function applyHandoffOptions(
 			const modelId = options.model.slice(slashIdx + 1);
 			const model = ctx.modelRegistry.find(provider, modelId);
 			if (model) {
-				await pi.setModel(model);
+				const ok = await pi.setModel(model);
+				if (!ok && ctx.hasUI) {
+					ctx.ui.notify(
+						`Handoff: ${options.model} has no API key; using current model`,
+						"warning",
+					);
+				}
 			} else if (ctx.hasUI) {
 				ctx.ui.notify(`Handoff: unknown model ${options.model}`, "warning");
 			}
@@ -264,6 +284,7 @@ async function performHandoff(
 	goal: string,
 	fromCommand: boolean,
 	stashToolPath: (v: { prompt: string; parentSession: string | undefined; options?: HandoffOptions }) => void,
+	markCommandHandoff: () => void,
 	options?: HandoffOptions,
 ): Promise<string | undefined> {
 	if (ctx.mode !== "tui") return "Handoff requires interactive mode.";
@@ -320,6 +341,7 @@ async function performHandoff(
 				}
 				: undefined;
 		setPendingHandoffGlobal({ prompt: finalPrompt, options: hasOptions ? options : undefined, restore });
+		markCommandHandoff();
 		try {
 			const result = await cmdCtx.newSession({ parentSession });
 			if (result.cancelled) {
@@ -350,6 +372,10 @@ export default function (pi: ExtensionAPI) {
 	// Timestamp marking the tool-path session switch; used by the context
 	// handler to filter out pre-handoff messages that linger in agent state.
 	let handoffTimestamp: number | null = null;
+	// True between stashing a command-path handoff and the resulting
+	// session_shutdown. Lets that shutdown preserve the stash for the fresh
+	// instance's session_start instead of clearing it as a leaked stash.
+	let commandHandoffPending = false;
 
 	// After the agent loop ends, perform the deferred tool-path switch.
 	pi.on("agent_end", (_event, ctx) => {
@@ -422,8 +448,16 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// Belt-and-suspenders: never let a leaked stash survive a shutdown.
+	// Defensive: clear a leaked stash on shutdown. A command-path handoff is
+	// the exception — newSession() fires session_shutdown on THIS (old)
+	// instance immediately before the fresh instance's session_start consumes
+	// the stash, so clearing here would race that start handler and lose the
+	// handoff. commandHandoffPending marks exactly that case.
 	pi.on("session_shutdown", () => {
+		if (commandHandoffPending) {
+			commandHandoffPending = false;
+			return;
+		}
 		setPendingHandoffGlobal(null);
 	});
 
@@ -443,6 +477,9 @@ export default function (pi: ExtensionAPI) {
 				goal,
 				true,
 				() => {},
+				() => {
+					commandHandoffPending = true;
+				},
 				hasOptions ? options : undefined,
 			);
 			if (error) ctx.ui.notify(error, "error");
@@ -484,6 +521,7 @@ export default function (pi: ExtensionAPI) {
 				(v) => {
 					pending = v;
 				},
+				() => {},
 				hasOptions ? options : undefined,
 			);
 			return {
