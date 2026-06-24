@@ -1262,10 +1262,10 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		lastObservedModel = { provider: ctx.model?.provider, modelId: ctx.model?.id };
 		await ensureRuntime(pi, ctx);
-		const appliedStartupMode = await applyStartupModeFlag(pi, ctx);
+		const appliedStartupMode = event.reason === "startup" && (await applyStartupModeFlag(pi, ctx));
 		if (!appliedStartupMode) await syncModeFromCurrentSelection(pi, ctx);
 	});
 
