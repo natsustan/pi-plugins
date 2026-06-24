@@ -15,6 +15,8 @@
  *   /mode <name>       switch directly
  *   /mode store [name] save current selection into a mode
  *   /mode configure    configuration UI
+ *   pi --mode <name>   start in a named mode (extension compatibility shim)
+ *   pi --prompt-mode <name> same, without overloading pi's built-in --mode
  *   Ctrl+Shift+S       open picker
  *   Ctrl+S             cycle deep → rush → smart
  *   Option+D           in deep mode: cycle deep → deep² → deep³
@@ -415,6 +417,62 @@ let modeCycleQueue: Promise<void> = Promise.resolve();
 // which re-emits thinking_level_select synchronously. This flag short-circuits the
 // re-entry so we don't loop.
 let revertingThinking = false;
+
+const BUILTIN_APP_MODES = new Set(["text", "json", "rpc"]);
+
+function readCliValue(longName: string): string | undefined {
+	const args = process.argv.slice(2);
+	const eqPrefix = `--${longName}=`;
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === "--") break;
+		if (arg?.startsWith(eqPrefix)) return arg.slice(eqPrefix.length).trim();
+		if (arg === `--${longName}`) {
+			const next = args[i + 1];
+			if (next && !next.startsWith("-") && !next.startsWith("@")) return next.trim();
+		}
+	}
+	return undefined;
+}
+
+function readStartupModeFlag(pi: ExtensionAPI): string | undefined {
+	const promptMode = pi.getFlag("prompt-mode");
+	if (typeof promptMode === "string" && promptMode.trim()) return promptMode.trim();
+
+	const ampMode = pi.getFlag("amp-mode");
+	if (typeof ampMode === "string" && ampMode.trim()) return ampMode.trim();
+
+	// Compatibility shim for the desired Amp-style spelling:
+	//   pi --mode deep
+	// pi core already owns --mode for app output modes (json/rpc/text), but for
+	// any other value it currently consumes the argument and leaves the app mode
+	// unset. Reading raw argv here lets amp-modes treat those non-core values as
+	// named prompt modes without interfering with --mode json/rpc/text.
+	const rawMode = readCliValue("mode");
+	if (rawMode && !BUILTIN_APP_MODES.has(rawMode)) return rawMode;
+
+	return undefined;
+}
+
+async function applyStartupModeFlag(pi: ExtensionAPI, ctx: ExtensionContext): Promise<boolean> {
+	const startupMode = readStartupModeFlag(pi);
+	if (!startupMode) return false;
+
+	await ensureRuntime(pi, ctx);
+	if (!runtime.overlayEnabled) {
+		if (ctx.hasUI) ctx.ui.notify("Mode overlay is disabled; startup mode ignored.", "warning");
+		return false;
+	}
+
+	if (!runtime.data.modes[startupMode]) {
+		const available = orderedModeNames(runtime.data.modes).join(", ") || "(none)";
+		if (ctx.hasUI) ctx.ui.notify(`Unknown mode "${startupMode}". Available: ${available}`, "warning");
+		return false;
+	}
+
+	await applyMode(pi, ctx, startupMode);
+	return true;
+}
 
 async function ensureRuntime(_pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 	const filePath = await resolveModesPath(ctx.cwd);
@@ -1122,6 +1180,15 @@ async function selectModeUI(pi: ExtensionAPI, ctx: ExtensionContext): Promise<vo
 // =============================================================================
 
 export default function (pi: ExtensionAPI) {
+	pi.registerFlag("prompt-mode", {
+		description: "Start in a named amp prompt mode (rush, smart, deep, ...)",
+		type: "string",
+	});
+	pi.registerFlag("amp-mode", {
+		description: "Alias for --prompt-mode",
+		type: "string",
+	});
+
 	const applyBridge = async (targetPi: ExtensionAPI, ctx: ExtensionContext, mode: string) => {
 		await applyMode(targetPi, ctx, mode);
 		return true;
@@ -1195,10 +1262,11 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		lastObservedModel = { provider: ctx.model?.provider, modelId: ctx.model?.id };
 		await ensureRuntime(pi, ctx);
-		await syncModeFromCurrentSelection(pi, ctx);
+		const appliedStartupMode = event.reason === "startup" && (await applyStartupModeFlag(pi, ctx));
+		if (!appliedStartupMode) await syncModeFromCurrentSelection(pi, ctx);
 	});
 
 	pi.on("session_shutdown", async () => {

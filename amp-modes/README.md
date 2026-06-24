@@ -12,6 +12,8 @@ and the mode manager can be installed and versioned independently.
 /mode rush         # switch directly
 /mode store fast   # save current selection into a mode
 /mode configure    # add / rename / delete / edit modes
+pi --mode deep     # start pi in a named prompt mode
+pi --prompt-mode deep  # explicit non-overloaded spelling
 Ctrl+Shift+S       # open picker
 Ctrl+S             # cycle deep -> rush -> smart
 Option+D           # in deep mode: deep -> deep² -> deep³
@@ -30,6 +32,25 @@ or in `.pi/modes.json` per project) are model-agnostic by default:
 
 Add `provider` and `modelId` to any mode if you want that mode to switch models
 as well as thinking level.
+
+## CLI startup mode
+
+With this extension loaded, you can start directly in a named prompt mode:
+
+```bash
+pi --mode deep
+pi --mode smart -p "summarize this repo"
+```
+
+pi core still owns `--mode json` / `--mode rpc` for output modes; amp-modes only
+claims non-core values that match your `modes.json` names. If you prefer not to
+overload pi's built-in `--mode`, use the explicit extension flag instead:
+
+```bash
+pi --prompt-mode deep
+# or
+pi --amp-mode deep
+```
 
 The active mode is reverse-matched from your current model + thinking whenever
 they change (Ctrl+P, `/model`, other extensions), so the label stays accurate.
